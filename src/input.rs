@@ -1,0 +1,292 @@
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
+use std::time::Duration;
+
+use crate::board::{Board, find_complete_path};
+use crate::components::{GameWorld, PathMarker, SelectionMenu, Tower};
+use crate::game::{AppScreen, Game, Phase};
+use crate::gem::GemGrade;
+use crate::grid::{grid_to_world, world_to_grid};
+use crate::ui::{
+    clear_selection_menu, is_upgrade_button_click, offer_index_at, refresh_path_markers,
+    spawn_selection_menu, tower_sprite_size,
+};
+
+pub fn select_offer(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
+    if game.screen != AppScreen::Playing || game.phase != Phase::Build {
+        return;
+    }
+
+    let requested = [
+        KeyCode::Digit1,
+        KeyCode::Digit2,
+        KeyCode::Digit3,
+        KeyCode::Digit4,
+        KeyCode::Digit5,
+    ]
+    .into_iter()
+    .enumerate()
+    .find_map(|(index, key)| keys.just_pressed(key).then_some(index));
+
+    if let Some(index) = requested {
+        if game.offers[index].is_some() {
+            game.selected_offer = index;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn place_or_select(
+    mut commands: Commands,
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<(&Camera, &GlobalTransform)>,
+    mut game: ResMut<Game>,
+    mut board: ResMut<Board>,
+    path_markers: Query<Entity, With<PathMarker>>,
+    menu_items: Query<Entity, With<SelectionMenu>>,
+    mut towers: Query<(Entity, &mut Tower, &mut Sprite)>,
+) {
+    if game.screen != AppScreen::Playing
+        || game.phase != Phase::Build
+        || !buttons.just_pressed(MouseButton::Left)
+    {
+        return;
+    }
+
+    let Some(world_pos) = cursor_world_position(&windows, &camera) else {
+        return;
+    };
+
+    if let Some(offer_index) = offer_index_at(world_pos) {
+        if game.offers[offer_index].is_some() {
+            game.selected_offer = offer_index;
+            clear_selection_menu(&mut commands, &menu_items);
+            game.selected_tower = None;
+            game.upgrade_source = None;
+        }
+        return;
+    }
+
+    if game.selected_tower.is_some() && is_upgrade_button_click(world_pos) {
+        begin_upgrade_selection(&mut commands, &mut game, &towers, &menu_items);
+        return;
+    }
+
+    let Some(grid_pos) = world_to_grid(world_pos) else {
+        return;
+    };
+
+    if let Some(&tower_entity) = board.towers.get(&grid_pos) {
+        if game.upgrade_source.is_some() {
+            complete_upgrade(
+                &mut commands,
+                &mut game,
+                &mut board,
+                &path_markers,
+                &menu_items,
+                &mut towers,
+                tower_entity,
+            );
+        } else {
+            select_tower(&mut commands, &mut game, &menu_items, &towers, tower_entity);
+        }
+        return;
+    }
+
+    if game.upgrade_source.is_some() {
+        game.message = "Select a matching duplicate tower to sacrifice.".to_string();
+        return;
+    }
+
+    place_tower(
+        &mut commands,
+        &mut game,
+        &mut board,
+        &path_markers,
+        &menu_items,
+        grid_pos,
+    );
+}
+
+fn begin_upgrade_selection(
+    commands: &mut Commands,
+    game: &mut Game,
+    towers: &Query<(Entity, &mut Tower, &mut Sprite)>,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+) {
+    let Some(source) = game.selected_tower else {
+        return;
+    };
+    let Ok((_, tower, _)) = towers.get(source) else {
+        game.selected_tower = None;
+        return;
+    };
+
+    if tower.grade.next().is_none() {
+        game.message = "That tower is already Perfect.".to_string();
+        return;
+    }
+
+    game.upgrade_source = Some(source);
+    game.message = format!(
+        "Click another {} {} to sacrifice.",
+        tower.grade.name(),
+        tower.gem.name()
+    );
+    clear_selection_menu(commands, menu_items);
+}
+
+fn select_tower(
+    commands: &mut Commands,
+    game: &mut Game,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+    towers: &Query<(Entity, &mut Tower, &mut Sprite)>,
+    tower_entity: Entity,
+) {
+    let Ok((_, tower, _)) = towers.get(tower_entity) else {
+        return;
+    };
+
+    game.selected_tower = Some(tower_entity);
+    game.upgrade_source = None;
+    game.message = format!("Selected {} {}.", tower.grade.name(), tower.gem.name());
+    clear_selection_menu(commands, menu_items);
+    spawn_selection_menu(commands, tower);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn complete_upgrade(
+    commands: &mut Commands,
+    game: &mut Game,
+    board: &mut Board,
+    path_markers: &Query<Entity, With<PathMarker>>,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+    towers: &mut Query<(Entity, &mut Tower, &mut Sprite)>,
+    sacrifice_entity: Entity,
+) {
+    let Some(source_entity) = game.upgrade_source else {
+        return;
+    };
+
+    if sacrifice_entity == source_entity {
+        game.message = "Pick a different matching tower to sacrifice.".to_string();
+        return;
+    }
+
+    let Ok(
+        [
+            (_, mut source_tower, mut source_sprite),
+            (_, sacrifice_tower, _),
+        ],
+    ) = towers.get_many_mut([source_entity, sacrifice_entity])
+    else {
+        game.message = "That upgrade target is no longer available.".to_string();
+        game.upgrade_source = None;
+        return;
+    };
+
+    if source_tower.gem != sacrifice_tower.gem || source_tower.grade != sacrifice_tower.grade {
+        game.message = format!(
+            "Upgrade needs another {} {}.",
+            source_tower.grade.name(),
+            source_tower.gem.name()
+        );
+        return;
+    }
+
+    let Some(next_grade) = source_tower.grade.next() else {
+        game.message = "That tower is already Perfect.".to_string();
+        game.upgrade_source = None;
+        return;
+    };
+
+    source_tower.grade = next_grade;
+    source_sprite.custom_size = Some(tower_sprite_size(next_grade));
+    commands.entity(sacrifice_entity).despawn();
+    board.towers.retain(|_, entity| *entity != sacrifice_entity);
+    board.recalculate_path();
+    refresh_path_markers(commands, path_markers, &board.path);
+    clear_selection_menu(commands, menu_items);
+
+    game.selected_tower = Some(source_entity);
+    game.upgrade_source = None;
+    game.message = format!(
+        "Upgraded to {} {}.",
+        source_tower.grade.name(),
+        source_tower.gem.name()
+    );
+}
+
+fn place_tower(
+    commands: &mut Commands,
+    game: &mut Game,
+    board: &mut Board,
+    path_markers: &Query<Entity, With<PathMarker>>,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+    grid_pos: crate::grid::GridPos,
+) {
+    if board.protected_cells().contains(&grid_pos) {
+        game.message =
+            "Start, checkpoints, and finish stay open; build around them to shape the path."
+                .to_string();
+        return;
+    }
+
+    let Some(gem) = game.selected_gem() else {
+        return;
+    };
+
+    let mut occupied = board.occupied_cells();
+    occupied.insert(grid_pos);
+
+    let Some(new_path) = find_complete_path(&occupied, &board.checkpoints) else {
+        game.message = "That placement would block the checkpoint route.".to_string();
+        return;
+    };
+
+    let tower_entity = spawn_tower(commands, grid_pos, gem);
+    board.towers.insert(grid_pos, tower_entity);
+    board.path = new_path;
+    refresh_path_markers(commands, path_markers, &board.path);
+    clear_selection_menu(commands, menu_items);
+    game.begin_countdown(gem);
+}
+
+fn spawn_tower(
+    commands: &mut Commands,
+    pos: crate::grid::GridPos,
+    gem: crate::gem::GemKind,
+) -> Entity {
+    let stats = gem.chipped_stats();
+    let mut cooldown = Timer::from_seconds(stats.cooldown, TimerMode::Once);
+    cooldown.set_elapsed(Duration::from_secs_f32(stats.cooldown));
+
+    commands
+        .spawn((
+            Sprite::from_color(gem.color(), tower_sprite_size(GemGrade::Chipped)),
+            Transform::from_translation(grid_to_world(pos).extend(5.0))
+                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
+            Tower {
+                gem,
+                grade: GemGrade::Chipped,
+                damage: stats.damage,
+                range: stats.range,
+                cooldown,
+            },
+            GameWorld,
+        ))
+        .id()
+}
+
+fn cursor_world_position(
+    windows: &Query<&Window, With<PrimaryWindow>>,
+    camera: &Query<(&Camera, &GlobalTransform)>,
+) -> Option<Vec2> {
+    let window = windows.single().ok()?;
+    let (camera, camera_transform) = camera.single().ok()?;
+    let cursor_position = window.cursor_position()?;
+    camera
+        .viewport_to_world_2d(camera_transform, cursor_position)
+        .ok()
+}

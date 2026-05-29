@@ -1,0 +1,13 @@
+[env]
+PATH = { value = "C:\\dev\\bevy\\.toolchains\\w64devkit\\bin;C:\\Users\\Collin\\.cargo\\bin;C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;C:\\Windows\\System32\\OpenSSH", force = true }
+
+[target.x86_64-pc-windows-gnu]
+linker = "C:\\dev\\bevy\\.toolchains\\w64devkit\\bin\\gcc.exe"
+rustflags = [
+    "-C",
+    "link-self-contained=yes",
+    "-C",
+    "dlltool=C:\\dev\\bevy\\.toolchains\\w64devkit\\bin\\dlltool.exe",
+    "-C",
+    "link-arg=-BC:\\dev\\bevy\\.toolchains\\w64devkit\\bin\\",
+]
