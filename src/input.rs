@@ -9,10 +9,15 @@ use crate::gem::GemGrade;
 use crate::grid::{grid_to_world, world_to_grid};
 use crate::ui::{
     clear_selection_menu, is_upgrade_button_click, offer_index_at, refresh_path_markers,
-    spawn_selection_menu, tower_sprite_size,
+    spawn_gem_info, spawn_selection_menu, tower_sprite_size,
 };
 
-pub fn select_offer(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
+pub fn select_offer(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut game: ResMut<Game>,
+    menu_items: Query<Entity, With<SelectionMenu>>,
+) {
     if game.screen != AppScreen::Playing || game.phase != Phase::Build {
         return;
     }
@@ -28,10 +33,14 @@ pub fn select_offer(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
     .enumerate()
     .find_map(|(index, key)| keys.just_pressed(key).then_some(index));
 
-    if let Some(index) = requested {
-        if game.offers[index].is_some() {
-            game.selected_offer = index;
-        }
+    if let Some(index) = requested
+        && let Some(gem) = game.offers[index]
+    {
+        game.selected_offer = index;
+        game.selected_tower = None;
+        game.upgrade_source = None;
+        clear_selection_menu(&mut commands, &menu_items);
+        spawn_gem_info(&mut commands, gem);
     }
 }
 
@@ -59,11 +68,12 @@ pub fn place_or_select(
     };
 
     if let Some(offer_index) = offer_index_at(world_pos) {
-        if game.offers[offer_index].is_some() {
+        if let Some(gem) = game.offers[offer_index] {
             game.selected_offer = offer_index;
-            clear_selection_menu(&mut commands, &menu_items);
             game.selected_tower = None;
             game.upgrade_source = None;
+            clear_selection_menu(&mut commands, &menu_items);
+            spawn_gem_info(&mut commands, gem);
         }
         return;
     }
@@ -208,6 +218,7 @@ fn complete_upgrade(
     board.recalculate_path();
     refresh_path_markers(commands, path_markers, &board.path);
     clear_selection_menu(commands, menu_items);
+    spawn_selection_menu(commands, &source_tower);
 
     game.selected_tower = Some(source_entity);
     game.upgrade_source = None;

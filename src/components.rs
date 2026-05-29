@@ -25,6 +25,21 @@ pub struct Enemy {
     pub speed: f32,
 }
 
+/// Temporary movement slow applied by Sapphire towers. Reapplying refreshes it.
+#[derive(Component)]
+pub struct Slowed {
+    pub factor: f32,
+    pub timer: Timer,
+}
+
+/// Stacking damage-over-time applied by Emerald towers.
+#[derive(Component)]
+pub struct Poison {
+    pub stacks: u32,
+    pub dps_per_stack: f32,
+    pub duration: Timer,
+}
+
 #[derive(Component)]
 pub struct ShotEffect {
     pub timer: Timer,
@@ -32,6 +47,9 @@ pub struct ShotEffect {
 
 #[derive(Component)]
 pub struct HudText;
+
+#[derive(Component)]
+pub struct TopBarText;
 
 #[derive(Component)]
 pub struct EscapeMenu;
