@@ -23,13 +23,18 @@ impl GemKind {
     }
 
     pub fn color(self) -> Color {
+        let [r, g, b] = self.srgb();
+        Color::srgb(r, g, b)
+    }
+
+    pub fn srgb(self) -> [f32; 3] {
         match self {
-            GemKind::Ruby => Color::srgb(0.92, 0.08, 0.12),
-            GemKind::Sapphire => Color::srgb(0.12, 0.33, 0.95),
-            GemKind::Topaz => Color::srgb(1.0, 0.74, 0.12),
-            GemKind::Emerald => Color::srgb(0.08, 0.72, 0.34),
-            GemKind::Amethyst => Color::srgb(0.68, 0.22, 0.92),
-            GemKind::Diamond => Color::srgb(0.86, 0.96, 1.0),
+            GemKind::Ruby => [0.92, 0.08, 0.12],
+            GemKind::Sapphire => [0.12, 0.33, 0.95],
+            GemKind::Topaz => [1.0, 0.74, 0.12],
+            GemKind::Emerald => [0.08, 0.72, 0.34],
+            GemKind::Amethyst => [0.68, 0.22, 0.92],
+            GemKind::Diamond => [0.86, 0.96, 1.0],
         }
     }
 
@@ -87,11 +92,20 @@ impl GemKind {
 pub enum GemEffect {
     None,
     /// Chance in `[0, 1]` to multiply a hit's damage by `multiplier`.
-    Crit { chance: f32, multiplier: f32 },
+    Crit {
+        chance: f32,
+        multiplier: f32,
+    },
     /// Multiplies enemy speed by `factor` (< 1.0) for `duration` seconds.
-    Slow { factor: f32, duration: f32 },
+    Slow {
+        factor: f32,
+        duration: f32,
+    },
     /// Deals `damage_fraction` of the hit to other enemies within `radius`.
-    Splash { radius: f32, damage_fraction: f32 },
+    Splash {
+        radius: f32,
+        damage_fraction: f32,
+    },
     /// Stacking damage-over-time; each hit adds a stack up to `max_stacks` and
     /// refreshes the `duration`.
     Poison {

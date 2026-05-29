@@ -11,6 +11,7 @@ use crate::components::{
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
 use crate::game::{AppScreen, Game, GameMode, Phase};
 use crate::gem::{GRADE_LADDER, GemEffect, GemGrade, GemKind};
+use crate::gem_visual::GemImages;
 use crate::grid::{GridPos, finish_pos, grid_to_world, offer_x, start_pos};
 
 const OFFER_GEM_Y: f32 = -302.0;
@@ -126,7 +127,10 @@ fn spawn_game_scene(commands: &mut Commands, board: &Board) {
 fn spawn_top_bar(commands: &mut Commands) {
     let y = 372.0;
     commands.spawn((
-        Sprite::from_color(Color::srgba(0.04, 0.05, 0.06, 0.92), Vec2::new(1280.0, 48.0)),
+        Sprite::from_color(
+            Color::srgba(0.04, 0.05, 0.06, 0.92),
+            Vec2::new(1280.0, 48.0),
+        ),
         Transform::from_xyz(0.0, y, 200.0),
         TopBarText,
         GameWorld,
@@ -327,6 +331,7 @@ pub fn update_top_bar(game: Res<Game>, mut bar: Query<&mut Text2d, With<TopBarTe
 
 pub fn update_offer_visuals(
     game: Res<Game>,
+    gem_images: Res<GemImages>,
     mut offer_sprites: Query<(&OfferVisual, &mut Sprite, &mut Transform)>,
     mut offer_labels: Query<(&OfferLabel, &mut Text2d, &mut TextColor)>,
 ) {
@@ -344,10 +349,11 @@ pub fn update_offer_visuals(
             Vec3::ONE
         };
 
-        sprite.color = match game.offers[offer.index] {
-            Some(gem) => gem.color(),
-            None => Color::srgb(0.08, 0.085, 0.09),
+        sprite.image = match game.offers[offer.index] {
+            Some(gem) => gem_images.handle(gem, GemGrade::Chipped),
+            None => gem_images.empty(),
         };
+        sprite.color = Color::WHITE;
     }
 
     for (label, mut text, mut color) in &mut offer_labels {
@@ -537,9 +543,11 @@ fn spawn_offer_bar(commands: &mut Commands) {
         let x = offer_x(index);
 
         commands.spawn((
-            Sprite::from_color(Color::srgb(0.16, 0.17, 0.18), Vec2::splat(48.0)),
-            Transform::from_xyz(x, OFFER_GEM_Y, 90.0)
-                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
+            Sprite {
+                custom_size: Some(Vec2::splat(48.0)),
+                ..default()
+            },
+            Transform::from_xyz(x, OFFER_GEM_Y, 90.0),
             OfferVisual { index },
             GameWorld,
         ));

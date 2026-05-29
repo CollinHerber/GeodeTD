@@ -81,27 +81,23 @@ pub fn tower_attack(
                 chance,
                 jumps,
                 damage_fraction,
-            } => {
-                if game.rng.next_f32() < chance {
-                    let mut from = target_position;
-                    let mut hit: HashSet<Entity> = HashSet::from([target]);
-                    for _ in 0..jumps {
-                        let next = snapshot
-                            .iter()
-                            .filter(|(entity, position)| {
-                                !hit.contains(entity) && position.distance(from) <= CHAIN_JUMP_RADIUS
-                            })
-                            .min_by(|(_, a), (_, b)| {
-                                a.distance(from).total_cmp(&b.distance(from))
-                            });
-                        let Some((entity, position)) = next else {
-                            break;
-                        };
-                        secondary.push((*entity, damage * damage_fraction));
-                        beams.push((from, *position, LIGHTNING_COLOR, 5.0));
-                        from = *position;
-                        hit.insert(*entity);
-                    }
+            } if game.rng.next_f32() < chance => {
+                let mut from = target_position;
+                let mut hit: HashSet<Entity> = HashSet::from([target]);
+                for _ in 0..jumps {
+                    let next = snapshot
+                        .iter()
+                        .filter(|(entity, position)| {
+                            !hit.contains(entity) && position.distance(from) <= CHAIN_JUMP_RADIUS
+                        })
+                        .min_by(|(_, a), (_, b)| a.distance(from).total_cmp(&b.distance(from)));
+                    let Some((entity, position)) = next else {
+                        break;
+                    };
+                    secondary.push((*entity, damage * damage_fraction));
+                    beams.push((from, *position, LIGHTNING_COLOR, 5.0));
+                    from = *position;
+                    hit.insert(*entity);
                 }
             }
             _ => {}
@@ -113,7 +109,12 @@ pub fn tower_attack(
         } else {
             (tower.gem.color(), 4.0)
         };
-        beams.push((tower_position, target_position, primary_color, primary_thickness));
+        beams.push((
+            tower_position,
+            target_position,
+            primary_color,
+            primary_thickness,
+        ));
 
         if let Ok((_, _, mut enemy)) = enemies.get_mut(target) {
             enemy.health -= damage;

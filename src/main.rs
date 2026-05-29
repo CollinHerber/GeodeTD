@@ -4,6 +4,7 @@ mod components;
 mod constants;
 mod game;
 mod gem;
+mod gem_visual;
 mod grid;
 mod input;
 mod rng;
@@ -17,6 +18,7 @@ use combat::{
     apply_poison, cleanup_effects, reap_enemies, tower_attack, update_enemy_visuals, update_slow,
 };
 use game::Game;
+use gem_visual::GemImages;
 use input::{place_or_select, select_offer};
 use ui::{
     handle_menu_clicks, setup, toggle_escape_menu, update_hud, update_offer_visuals, update_top_bar,
@@ -36,6 +38,7 @@ fn main() {
             }),
             ..default()
         }))
+        .init_resource::<GemImages>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,

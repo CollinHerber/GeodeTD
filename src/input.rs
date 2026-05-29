@@ -6,6 +6,7 @@ use crate::board::{Board, find_complete_path};
 use crate::components::{GameWorld, PathMarker, SelectionMenu, Tower};
 use crate::game::{AppScreen, Game, Phase};
 use crate::gem::GemGrade;
+use crate::gem_visual::GemImages;
 use crate::grid::{grid_to_world, world_to_grid};
 use crate::ui::{
     clear_selection_menu, is_upgrade_button_click, offer_index_at, refresh_path_markers,
@@ -55,6 +56,7 @@ pub fn place_or_select(
     path_markers: Query<Entity, With<PathMarker>>,
     menu_items: Query<Entity, With<SelectionMenu>>,
     mut towers: Query<(Entity, &mut Tower, &mut Sprite)>,
+    gem_images: Res<GemImages>,
 ) {
     if game.screen != AppScreen::Playing
         || game.phase != Phase::Build
@@ -96,6 +98,7 @@ pub fn place_or_select(
                 &path_markers,
                 &menu_items,
                 &mut towers,
+                &gem_images,
                 tower_entity,
             );
         } else {
@@ -115,6 +118,7 @@ pub fn place_or_select(
         &mut board,
         &path_markers,
         &menu_items,
+        &gem_images,
         grid_pos,
     );
 }
@@ -173,6 +177,7 @@ fn complete_upgrade(
     path_markers: &Query<Entity, With<PathMarker>>,
     menu_items: &Query<Entity, With<SelectionMenu>>,
     towers: &mut Query<(Entity, &mut Tower, &mut Sprite)>,
+    gem_images: &GemImages,
     sacrifice_entity: Entity,
 ) {
     let Some(source_entity) = game.upgrade_source else {
@@ -212,6 +217,7 @@ fn complete_upgrade(
     };
 
     source_tower.grade = next_grade;
+    source_sprite.image = gem_images.handle(source_tower.gem, next_grade);
     source_sprite.custom_size = Some(tower_sprite_size(next_grade));
     commands.entity(sacrifice_entity).despawn();
     board.towers.retain(|_, entity| *entity != sacrifice_entity);
@@ -235,6 +241,7 @@ fn place_tower(
     board: &mut Board,
     path_markers: &Query<Entity, With<PathMarker>>,
     menu_items: &Query<Entity, With<SelectionMenu>>,
+    gem_images: &GemImages,
     grid_pos: crate::grid::GridPos,
 ) {
     if board.protected_cells().contains(&grid_pos) {
@@ -256,7 +263,7 @@ fn place_tower(
         return;
     };
 
-    let tower_entity = spawn_tower(commands, grid_pos, gem);
+    let tower_entity = spawn_tower(commands, grid_pos, gem, gem_images);
     board.towers.insert(grid_pos, tower_entity);
     board.path = new_path;
     refresh_path_markers(commands, path_markers, &board.path);
@@ -268,6 +275,7 @@ fn spawn_tower(
     commands: &mut Commands,
     pos: crate::grid::GridPos,
     gem: crate::gem::GemKind,
+    gem_images: &GemImages,
 ) -> Entity {
     let stats = gem.chipped_stats();
     let mut cooldown = Timer::from_seconds(stats.cooldown, TimerMode::Once);
@@ -275,9 +283,12 @@ fn spawn_tower(
 
     commands
         .spawn((
-            Sprite::from_color(gem.color(), tower_sprite_size(GemGrade::Chipped)),
-            Transform::from_translation(grid_to_world(pos).extend(5.0))
-                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
+            Sprite {
+                image: gem_images.handle(gem, GemGrade::Chipped),
+                custom_size: Some(tower_sprite_size(GemGrade::Chipped)),
+                ..default()
+            },
+            Transform::from_translation(grid_to_world(pos).extend(5.0)),
             Tower {
                 gem,
                 grade: GemGrade::Chipped,
