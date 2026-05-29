@@ -6,11 +6,11 @@ use crate::board::Board;
 use crate::components::{
     CheckpointMarker, EscapeMenu, GameWorld, HomeScreen, HowToPlayScreen, HudText, MenuAction,
     MenuButton, ModeSelectScreen, OfferLabel, OfferVisual, PathMarker, SelectionMenu,
-    SettingsScreen, Tower, UpgradeButton,
+    SettingsScreen, TopBarText, Tower, UpgradeButton,
 };
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
 use crate::game::{AppScreen, Game, GameMode, Phase};
-use crate::gem::{GRADE_LADDER, GemGrade};
+use crate::gem::{GRADE_LADDER, GemEffect, GemGrade, GemKind};
 use crate::grid::{GridPos, finish_pos, grid_to_world, offer_x, start_pos};
 
 const OFFER_GEM_Y: f32 = -302.0;
@@ -120,6 +120,28 @@ fn spawn_game_scene(commands: &mut Commands, board: &Board) {
     spawn_path_markers(commands, &board.path);
     spawn_checkpoint_markers(commands, &board.checkpoints);
     spawn_offer_bar(commands);
+    spawn_top_bar(commands);
+}
+
+fn spawn_top_bar(commands: &mut Commands) {
+    let y = 372.0;
+    commands.spawn((
+        Sprite::from_color(Color::srgba(0.04, 0.05, 0.06, 0.92), Vec2::new(1280.0, 48.0)),
+        Transform::from_xyz(0.0, y, 200.0),
+        TopBarText,
+        GameWorld,
+    ));
+    commands.spawn((
+        Text2d::new(""),
+        TextFont {
+            font_size: 24.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.93, 0.95, 0.96)),
+        Transform::from_xyz(0.0, y, 210.0),
+        TopBarText,
+        GameWorld,
+    ));
 }
 
 pub fn toggle_escape_menu(
@@ -169,8 +191,16 @@ pub fn spawn_selection_menu(commands: &mut Commands, tower: &Tower) {
         None => "Perfect grade".to_string(),
     };
 
+    let damage = tower.damage * tower.grade.damage_multiplier();
+    let stats = stats_text(
+        damage,
+        tower.range,
+        tower.cooldown.duration().as_secs_f32(),
+        tower.gem.effect(tower.grade),
+    );
+
     commands.spawn((
-        Sprite::from_color(Color::srgb(0.12, 0.13, 0.14), Vec2::new(236.0, 150.0)),
+        Sprite::from_color(Color::srgb(0.12, 0.13, 0.14), Vec2::new(240.0, 226.0)),
         Transform::from_xyz(x, y, 120.0),
         SelectionMenu,
         GameWorld,
@@ -183,7 +213,19 @@ pub fn spawn_selection_menu(commands: &mut Commands, tower: &Tower) {
             ..default()
         },
         TextColor(Color::srgb(0.94, 0.95, 0.95)),
-        Transform::from_xyz(x, y + 46.0, 130.0),
+        Transform::from_xyz(x, y + 86.0, 130.0),
+        SelectionMenu,
+        GameWorld,
+    ));
+
+    commands.spawn((
+        Text2d::new(stats),
+        TextFont {
+            font_size: 15.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.80, 0.84, 0.86)),
+        Transform::from_xyz(x, y + 24.0, 130.0),
         SelectionMenu,
         GameWorld,
     ));
@@ -211,6 +253,76 @@ pub fn spawn_selection_menu(commands: &mut Commands, tower: &Tower) {
         SelectionMenu,
         GameWorld,
     ));
+}
+
+/// Read-only stat panel for a gem offer (before placement). Shows the same stats
+/// as a placed tower at Chipped grade, but without the upgrade button.
+pub fn spawn_gem_info(commands: &mut Commands, gem: GemKind) {
+    let center = selection_menu_center();
+    let stats = gem.chipped_stats();
+    let body = stats_text(
+        stats.damage,
+        stats.range,
+        stats.cooldown,
+        gem.effect(GemGrade::Chipped),
+    );
+
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.12, 0.13, 0.14), Vec2::new(240.0, 150.0)),
+        Transform::from_xyz(center.x, center.y, 120.0),
+        SelectionMenu,
+        GameWorld,
+    ));
+    commands.spawn((
+        Text2d::new(format!("Chipped {}", gem.name())),
+        TextFont {
+            font_size: 18.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.94, 0.95, 0.95)),
+        Transform::from_xyz(center.x, center.y + 48.0, 130.0),
+        SelectionMenu,
+        GameWorld,
+    ));
+    commands.spawn((
+        Text2d::new(body),
+        TextFont {
+            font_size: 15.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.80, 0.84, 0.86)),
+        Transform::from_xyz(center.x, center.y - 14.0, 130.0),
+        SelectionMenu,
+        GameWorld,
+    ));
+}
+
+fn stats_text(damage: f32, range: f32, cooldown: f32, effect: GemEffect) -> String {
+    let fire_rate = if cooldown > 0.0 { 1.0 / cooldown } else { 0.0 };
+    format!(
+        "Damage: {:.0}\nRange: {:.0}\nFire rate: {:.2}/s\n{}",
+        damage,
+        range,
+        fire_rate,
+        effect.describe()
+    )
+}
+
+pub fn update_top_bar(game: Res<Game>, mut bar: Query<&mut Text2d, With<TopBarText>>) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    let Ok(mut text) = bar.single_mut() else {
+        return;
+    };
+
+    text.0 = format!(
+        "Wave {}        Lives {}        Coins {}",
+        game.round,
+        game.lives.max(0),
+        game.coins
+    );
 }
 
 pub fn update_offer_visuals(
@@ -295,7 +407,7 @@ pub fn update_hud(game: Res<Game>, board: Res<Board>, mut hud: Query<&mut Text2d
 }
 
 pub fn upgrade_button_center() -> Vec2 {
-    selection_menu_center() + Vec2::new(0.0, -8.0)
+    selection_menu_center() + Vec2::new(0.0, -80.0)
 }
 
 pub fn is_upgrade_button_click(world_pos: Vec2) -> bool {

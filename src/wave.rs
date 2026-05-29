@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::board::Board;
-use crate::components::{Enemy, GameWorld};
+use crate::components::{Enemy, GameWorld, Slowed};
 use crate::game::{AppScreen, Game, Phase};
 use crate::grid::grid_to_world;
 
@@ -48,7 +48,7 @@ pub fn move_enemies(
     time: Res<Time>,
     mut game: ResMut<Game>,
     board: Res<Board>,
-    mut enemies: Query<(Entity, &mut Transform, &mut Enemy)>,
+    mut enemies: Query<(Entity, &mut Transform, &mut Enemy, Option<&Slowed>)>,
 ) {
     if game.screen != AppScreen::Playing {
         return;
@@ -56,22 +56,18 @@ pub fn move_enemies(
 
     let delta = time.delta_secs();
 
-    for (entity, mut transform, mut enemy) in &mut enemies {
-        if enemy.health <= 0.0 {
-            commands.entity(entity).despawn();
-            continue;
-        }
-
+    for (entity, mut transform, mut enemy, slowed) in &mut enemies {
         if enemy.next_path_index >= board.path.len() {
             game.lives -= 1;
             commands.entity(entity).despawn();
             continue;
         }
 
+        let speed = enemy.speed * slowed.map_or(1.0, |slow| slow.factor);
         let target = grid_to_world(board.path[enemy.next_path_index]);
         let current = transform.translation.truncate();
         let to_target = target - current;
-        let step = enemy.speed * delta;
+        let step = speed * delta;
 
         if to_target.length() <= step {
             transform.translation = target.extend(10.0);

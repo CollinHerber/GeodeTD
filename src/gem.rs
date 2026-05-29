@@ -35,12 +35,102 @@ impl GemKind {
 
     pub fn chipped_stats(self) -> TowerStats {
         match self {
-            GemKind::Ruby => TowerStats::new(16.0, 132.0, 0.86),
-            GemKind::Sapphire => TowerStats::new(10.0, 150.0, 0.72),
+            // Large damage, slow attack, medium range — plus a small splash.
+            GemKind::Ruby => TowerStats::new(26.0, 134.0, 1.15),
+            // Low damage, high range, average attack speed — plus a slow.
+            GemKind::Sapphire => TowerStats::new(7.0, 172.0, 0.8),
+            // Fast, low-damage poke (unchanged baseline).
             GemKind::Topaz => TowerStats::new(7.0, 118.0, 0.36),
-            GemKind::Emerald => TowerStats::new(12.0, 178.0, 0.82),
-            GemKind::Amethyst => TowerStats::new(22.0, 112.0, 1.15),
-            GemKind::Diamond => TowerStats::new(13.0, 146.0, 0.68),
+            // Low hit damage, slow attack, medium range — plus stacking poison.
+            GemKind::Emerald => TowerStats::new(6.0, 138.0, 1.0),
+            // High range, low damage, medium attack speed.
+            GemKind::Amethyst => TowerStats::new(8.0, 190.0, 0.8),
+            // Average damage and attack speed, small range — plus crits.
+            GemKind::Diamond => TowerStats::new(13.0, 112.0, 0.8),
+        }
+    }
+
+    /// The special on-hit behavior for this gem, scaled by the tower's grade.
+    pub fn effect(self, grade: GemGrade) -> GemEffect {
+        let tier = grade.tier() as f32;
+        match self {
+            GemKind::Diamond => GemEffect::Crit {
+                chance: 0.05 + 0.03 * tier,
+                multiplier: 2.0,
+            },
+            GemKind::Sapphire => GemEffect::Slow {
+                factor: (0.6 - 0.05 * tier).max(0.3),
+                duration: 1.5,
+            },
+            GemKind::Ruby => GemEffect::Splash {
+                radius: 46.0,
+                damage_fraction: 0.5,
+            },
+            GemKind::Emerald => GemEffect::Poison {
+                dps_per_stack: 4.0 + tier,
+                duration: 3.0,
+                max_stacks: 5,
+            },
+            GemKind::Topaz => GemEffect::Chain {
+                chance: 0.05 + 0.02 * tier,
+                jumps: 3 + grade.tier() as u32,
+                damage_fraction: 0.6,
+            },
+            GemKind::Amethyst => GemEffect::None,
+        }
+    }
+}
+
+/// On-hit behavior layered on top of a tower's base damage. Magnitudes already
+/// account for grade where relevant (see `GemKind::effect`).
+#[derive(Clone, Copy)]
+pub enum GemEffect {
+    None,
+    /// Chance in `[0, 1]` to multiply a hit's damage by `multiplier`.
+    Crit { chance: f32, multiplier: f32 },
+    /// Multiplies enemy speed by `factor` (< 1.0) for `duration` seconds.
+    Slow { factor: f32, duration: f32 },
+    /// Deals `damage_fraction` of the hit to other enemies within `radius`.
+    Splash { radius: f32, damage_fraction: f32 },
+    /// Stacking damage-over-time; each hit adds a stack up to `max_stacks` and
+    /// refreshes the `duration`.
+    Poison {
+        dps_per_stack: f32,
+        duration: f32,
+        max_stacks: u32,
+    },
+    /// Chance to arc to up to `jumps` nearby enemies, each taking
+    /// `damage_fraction` of the hit.
+    Chain {
+        chance: f32,
+        jumps: u32,
+        damage_fraction: f32,
+    },
+}
+
+impl GemEffect {
+    /// Short one-line summary for the tower stat panel.
+    pub fn describe(self) -> String {
+        match self {
+            GemEffect::None => "Effect: none".to_string(),
+            GemEffect::Crit { chance, multiplier } => {
+                format!("Crit: {:.0}% for x{:.0}", chance * 100.0, multiplier)
+            }
+            GemEffect::Slow { factor, duration } => {
+                format!("Slow: -{:.0}% for {:.1}s", (1.0 - factor) * 100.0, duration)
+            }
+            GemEffect::Splash {
+                radius,
+                damage_fraction,
+            } => format!("Splash: {:.0}% in r{:.0}", damage_fraction * 100.0, radius),
+            GemEffect::Poison {
+                dps_per_stack,
+                max_stacks,
+                ..
+            } => format!("Poison: {:.0}/s up to {}x", dps_per_stack, max_stacks),
+            GemEffect::Chain { chance, jumps, .. } => {
+                format!("Chain: {:.0}% to {} targets", chance * 100.0, jumps)
+            }
         }
     }
 }
@@ -79,6 +169,17 @@ impl GemGrade {
             GemGrade::Regular => "Regular",
             GemGrade::Cut => "Cut",
             GemGrade::Perfect => "Perfect",
+        }
+    }
+
+    /// Position on the `GRADE_LADDER`, `0` (Chipped) through `4` (Perfect).
+    pub fn tier(self) -> usize {
+        match self {
+            GemGrade::Chipped => 0,
+            GemGrade::Flawed => 1,
+            GemGrade::Regular => 2,
+            GemGrade::Cut => 3,
+            GemGrade::Perfect => 4,
         }
     }
 

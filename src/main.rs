@@ -11,12 +11,16 @@ mod ui;
 mod wave;
 
 use bevy::prelude::*;
-use bevy::window::{WindowPlugin, WindowResolution};
+use bevy::window::{MonitorSelection, WindowMode, WindowPlugin};
 use board::Board;
-use combat::{cleanup_effects, tower_attack, update_enemy_visuals};
+use combat::{
+    apply_poison, cleanup_effects, reap_enemies, tower_attack, update_enemy_visuals, update_slow,
+};
 use game::Game;
 use input::{place_or_select, select_offer};
-use ui::{handle_menu_clicks, setup, toggle_escape_menu, update_hud, update_offer_visuals};
+use ui::{
+    handle_menu_clicks, setup, toggle_escape_menu, update_hud, update_offer_visuals, update_top_bar,
+};
 use wave::{move_enemies, run_wave, update_wave_countdown};
 
 fn main() {
@@ -27,7 +31,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Geode TD".into(),
-                resolution: WindowResolution::new(1280, 760),
+                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Current),
                 ..default()
             }),
             ..default()
@@ -40,12 +44,16 @@ fn main() {
                 place_or_select,
                 update_wave_countdown,
                 run_wave,
-                move_enemies,
+                apply_poison,
                 tower_attack,
+                reap_enemies,
+                update_slow,
+                move_enemies,
                 update_enemy_visuals,
                 cleanup_effects,
                 update_offer_visuals,
                 update_hud,
+                update_top_bar,
                 handle_menu_clicks,
                 toggle_escape_menu,
             )
