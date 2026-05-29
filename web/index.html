@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Geode TD</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b0d0f;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        margin: 0 auto;
+        outline: none;
+      }
+      #loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #cfe;
+        font-family: system-ui, sans-serif;
+        font-size: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">Loading Geode TD…</div>
+    <script type="module">
+      import init from "./geode_td.js";
+      init().then(() => {
+        const el = document.getElementById("loading");
+        if (el) el.remove();
+      });
+    </script>
+  </body>
+</html>

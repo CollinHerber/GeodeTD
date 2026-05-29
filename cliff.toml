@@ -1,0 +1,50 @@
+# git-cliff configuration.
+#
+# Changelog is generated from Conventional Commits. This project recognizes three
+# commit types (see [git.commit_parsers] below); everything else is skipped:
+#   feat:    a new feature        -> "Features"   (minor version bump)
+#   fix:     a bug fix            -> "Bug Fixes"  (patch version bump)
+#   balance: a gameplay tweak     -> "Balance"    (patch version bump)
+#
+# A commit may use a scope and/or a breaking-change marker, e.g.
+#   feat(towers): add chain lightning to topaz
+#   balance(ruby): lower base damage 26 -> 22
+#   feat!: rework grade ladder            (the "!" forces a major bump)
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project are documented in this file.
+"""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+- {{ commit.message | split(pat="\n") | first | upper_first }} ({{ commit.id | truncate(length=7, end="") }})
+{% endfor %}\
+{% endfor %}\n
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+# Only feat / fix / balance reach the changelog; everything else is dropped.
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^balance", group = "Balance" },
+  { message = "^.*", skip = true },
+]
+filter_commits = true
+tag_pattern = "v[0-9]*"
+topo_order = false
+sort_commits = "newer"

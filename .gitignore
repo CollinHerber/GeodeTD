@@ -1,4 +1,11 @@
 /target
 .idea/
+
+# CI build artifacts (produced by .github/workflows/release.yml)
+/dist
+/butler
+butler.zip
+RELEASE_NOTES.md
+geode_td-web-*.zip
 .claude/
 .codex/

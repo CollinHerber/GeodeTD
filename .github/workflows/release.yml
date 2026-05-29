@@ -1,0 +1,173 @@
+name: Release
+
+# On push to main: derive the next semantic version from Conventional Commits,
+# generate a changelog, build the WASM/web release, publish a GitHub Release,
+# and deploy the HTML5 build to itch.io with Butler.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags so git-cliff can version
+
+      # See ci.yml: these committed files target a local dev machine and break CI.
+      - name: Remove local-only toolchain config
+        run: rm -f rust-toolchain.toml .cargo/config.toml
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install git-cliff
+        run: cargo binstall -y git-cliff
+
+      # Compute the next version from the commits since the last v-tag.
+      #   breaking (type! or "BREAKING CHANGE") -> major
+      #   feat                                  -> minor
+      #   fix / balance                         -> patch
+      #   none of the above                     -> skip (no release)
+      # Done explicitly rather than via `git cliff --bumped-version` because the
+      # custom `balance` type is not a standard Conventional Commit type and would
+      # not trigger git-cliff's built-in bump on its own.
+      - name: Determine release version
+        id: version
+        run: |
+          LAST="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          if [ -z "$LAST" ]; then
+            RANGE="HEAD"
+            BASE="0.0.0"
+          else
+            RANGE="${LAST}..HEAD"
+            BASE="${LAST#v}"
+          fi
+          SUBJECTS="$(git log "$RANGE" --no-merges --format='%s')"
+          BODIES="$(git log "$RANGE" --no-merges --format='%b')"
+
+          bump=""
+          if printf '%s\n' "$SUBJECTS" | grep -qE '^[a-z]+(\([^)]*\))?!:' \
+             || printf '%s\n' "$BODIES" | grep -qE 'BREAKING CHANGE'; then
+            bump="major"
+          elif printf '%s\n' "$SUBJECTS" | grep -qE '^feat(\([^)]*\))?!?:'; then
+            bump="minor"
+          elif printf '%s\n' "$SUBJECTS" | grep -qE '^(fix|balance)(\([^)]*\))?!?:'; then
+            bump="patch"
+          fi
+
+          if [ -z "$bump" ]; then
+            echo "No releasable commits (feat/fix/balance) since ${LAST:-start}. Skipping."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          MA="${BASE%%.*}"
+          REST="${BASE#*.}"
+          MI="${REST%%.*}"
+          PA="${REST##*.}"
+          case "$bump" in
+            major) MA=$((MA + 1)); MI=0; PA=0 ;;
+            minor) MI=$((MI + 1)); PA=0 ;;
+            patch) PA=$((PA + 1)) ;;
+          esac
+          VERSION="v${MA}.${MI}.${PA}"
+          echo "Bump: $bump -> $VERSION"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        if: steps.version.outputs.release == 'true'
+        run: git cliff --unreleased --tag "${{ steps.version.outputs.version }}" --strip header -o RELEASE_NOTES.md
+
+      - name: Install Rust (wasm)
+        if: steps.version.outputs.release == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.version.outputs.release == 'true'
+
+      - name: Install wasm-bindgen-cli (matching Cargo.lock)
+        if: steps.version.outputs.release == 'true'
+        run: |
+          WBVER="$(grep -A1 'name = "wasm-bindgen"' Cargo.lock | grep '^version' | head -1 | sed -E 's/.*"(.*)".*/\1/')"
+          echo "wasm-bindgen version: ${WBVER:-latest}"
+          if [ -n "$WBVER" ]; then
+            cargo binstall -y "wasm-bindgen-cli@${WBVER}"
+          else
+            cargo binstall -y wasm-bindgen-cli
+          fi
+
+      - name: Build (WASM release)
+        if: steps.version.outputs.release == 'true'
+        run: cargo build --release --target wasm32-unknown-unknown --features bevy/webgl2
+
+      - name: Bundle web build
+        if: steps.version.outputs.release == 'true'
+        run: |
+          mkdir -p dist
+          wasm-bindgen --no-typescript --target web \
+            --out-dir ./dist --out-name geode_td \
+            target/wasm32-unknown-unknown/release/geode_td.wasm
+          cp web/index.html dist/index.html
+          if [ -d assets ]; then cp -r assets dist/assets; fi
+          (cd dist && zip -r ../geode_td-web-${{ steps.version.outputs.version }}.zip .)
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          files: geode_td-web-${{ steps.version.outputs.version }}.zip
+
+      # Push the HTML5 directory (not the zip) so itch serves it as a playable
+      # web build. Butler reads BUTLER_API_KEY from the environment automatically.
+      - name: Deploy to itch.io (Butler)
+        # `vars` is reliable in a step `if`; the secret is checked inside the
+        # script (step-level `env` is not dependable in its own `if`).
+        if: steps.version.outputs.release == 'true' && vars.ITCH_USER != '' && vars.ITCH_GAME != ''
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+          ITCH_USER: ${{ vars.ITCH_USER }}
+          ITCH_GAME: ${{ vars.ITCH_GAME }}
+        run: |
+          if [ -z "$BUTLER_API_KEY" ]; then
+            echo "BUTLER_API_KEY secret not set; skipping itch.io deploy."
+            exit 0
+          fi
+          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          unzip -o butler.zip
+          chmod +x butler
+          ./butler -V
+          ./butler push ./dist "${ITCH_USER}/${ITCH_GAME}:html" \
+            --userversion "${{ steps.version.outputs.version }}"
+
+      # Regenerate the full changelog including the new tag and commit it back.
+      # The [skip ci] tag plus the chore() type (ignored by cliff) prevents this
+      # commit from re-triggering a release.
+      - name: Update CHANGELOG.md
+        if: steps.version.outputs.release == 'true'
+        run: |
+          git cliff --tag "${{ steps.version.outputs.version }}" -o CHANGELOG.md
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore(release): ${{ steps.version.outputs.version }} [skip ci]"
+          git push origin HEAD:main

@@ -1,0 +1,46 @@
+name: CI
+
+# Fast checks on pull requests and on non-main pushes. The actual build/publish
+# pipeline lives in release.yml and runs on push to main.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The committed rust-toolchain.toml pins a local Windows-GNU toolchain and
+      # .cargo/config.toml force-overrides PATH for a local w64devkit. Neither
+      # exists on CI runners, so drop them on the runner only (the working tree
+      # in the repo is untouched).
+      - name: Remove local-only toolchain config
+        run: rm -f rust-toolchain.toml .cargo/config.toml
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Linux build deps (Bevy)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --release
