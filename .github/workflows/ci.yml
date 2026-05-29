@@ -15,7 +15,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5.0.1
 
       # The committed rust-toolchain.toml pins a local Windows-GNU toolchain and
       # .cargo/config.toml force-overrides PATH for a local w64devkit. Neither
@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.8.2
 
       - name: Format
         run: cargo fmt --all --check
