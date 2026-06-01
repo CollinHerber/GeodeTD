@@ -19,7 +19,9 @@ use combat::{
 };
 use game::Game;
 use gem_visual::GemImages;
-use input::{CameraDrag, pan_and_zoom_camera, place_or_select, select_offer};
+use input::{
+    CameraDrag, handle_tower_action_clicks, pan_and_zoom_camera, place_or_select, select_offer,
+};
 use ui::{
     handle_menu_clicks, setup, toggle_escape_menu, update_hud, update_offer_visuals, update_top_bar,
 };
@@ -46,6 +48,7 @@ fn main() {
             (
                 pan_and_zoom_camera,
                 select_offer,
+                handle_tower_action_clicks,
                 place_or_select,
                 update_wave_countdown,
                 run_wave,

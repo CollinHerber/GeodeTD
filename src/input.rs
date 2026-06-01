@@ -10,8 +10,8 @@ use crate::gem::GemGrade;
 use crate::gem_visual::GemImages;
 use crate::grid::{grid_to_world, world_to_grid};
 use crate::ui::{
-    clear_selection_menu, is_upgrade_button_click, offer_index_at, refresh_path_markers,
-    spawn_gem_info, spawn_selection_menu, tower_sprite_size,
+    clear_selection_menu, offer_index_at, refresh_path_markers, spawn_gem_info,
+    spawn_selection_menu, tower_sprite_size,
 };
 
 const MIN_CAMERA_SCALE: f32 = 0.45;
@@ -71,7 +71,7 @@ pub fn pan_and_zoom_camera(
     }
 
     if buttons.just_released(MouseButton::Left) {
-        drag.suppress_click = drag.distance >= PAN_DRAG_THRESHOLD;
+        drag.suppress_click = drag.suppress_click || drag.distance >= PAN_DRAG_THRESHOLD;
         drag.active = false;
         drag.distance = 0.0;
     }
@@ -106,6 +106,29 @@ pub fn select_offer(
         game.upgrade_source = None;
         clear_selection_menu(&mut commands, &menu_items);
         spawn_gem_info(&mut commands, gem);
+    }
+}
+
+pub fn handle_tower_action_clicks(
+    mut commands: Commands,
+    interactions: Query<
+        &Interaction,
+        (Changed<Interaction>, With<crate::components::UpgradeButton>),
+    >,
+    mut camera_drag: ResMut<CameraDrag>,
+    mut game: ResMut<Game>,
+    towers: Query<&Tower>,
+    menu_items: Query<Entity, With<SelectionMenu>>,
+) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    for interaction in &interactions {
+        if *interaction == Interaction::Pressed {
+            camera_drag.suppress_click = true;
+            begin_upgrade_selection(&mut commands, &mut game, &towers, &menu_items);
+        }
     }
 }
 
@@ -146,15 +169,6 @@ pub fn place_or_select(
             game.upgrade_source = None;
             clear_selection_menu(&mut commands, &menu_items);
             spawn_gem_info(&mut commands, gem);
-        }
-        return;
-    }
-
-    if game.selected_tower.is_some() && is_upgrade_button_click(world_pos) {
-        if game.phase == Phase::Build {
-            begin_upgrade_selection(&mut commands, &mut game, &towers, &menu_items);
-        } else {
-            game.message = "Upgrades are available during build rounds.".to_string();
         }
         return;
     }
@@ -204,16 +218,21 @@ pub fn place_or_select(
 fn begin_upgrade_selection(
     commands: &mut Commands,
     game: &mut Game,
-    towers: &Query<(Entity, &mut Tower, &mut Sprite)>,
+    towers: &Query<&Tower>,
     menu_items: &Query<Entity, With<SelectionMenu>>,
 ) {
     let Some(source) = game.selected_tower else {
         return;
     };
-    let Ok((_, tower, _)) = towers.get(source) else {
+    let Ok(tower) = towers.get(source) else {
         game.selected_tower = None;
         return;
     };
+
+    if game.phase != Phase::Build {
+        game.message = "Upgrades are available during build rounds.".to_string();
+        return;
+    }
 
     if tower.grade.next().is_none() {
         game.message = "That tower is already Perfect.".to_string();

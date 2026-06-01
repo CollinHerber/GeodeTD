@@ -121,31 +121,36 @@ fn spawn_game_scene(commands: &mut Commands, board: &Board) {
     spawn_path_markers(commands, &board.path);
     spawn_checkpoint_markers(commands, &board.checkpoints);
     spawn_offer_bar(commands);
-    spawn_top_bar(commands);
+    spawn_play_ui(commands);
 }
 
-fn spawn_top_bar(commands: &mut Commands) {
-    let y = 372.0;
-    commands.spawn((
-        Sprite::from_color(
-            Color::srgba(0.04, 0.05, 0.06, 0.92),
-            Vec2::new(1280.0, 48.0),
-        ),
-        Transform::from_xyz(0.0, y, 200.0),
-        TopBarText,
-        GameWorld,
-    ));
-    commands.spawn((
-        Text2d::new(""),
-        TextFont {
-            font_size: 24.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.93, 0.95, 0.96)),
-        Transform::from_xyz(0.0, y, 210.0),
-        TopBarText,
-        GameWorld,
-    ));
+fn spawn_play_ui(commands: &mut Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(0),
+                left: px(0),
+                width: percent(100),
+                height: px(52),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.035, 0.04, 0.045, 0.96)),
+            GameWorld,
+        ))
+        .with_children(|bar| {
+            bar.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 22.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.93, 0.95, 0.96)),
+                TopBarText,
+            ));
+        });
 }
 
 pub fn toggle_escape_menu(
@@ -186,9 +191,6 @@ pub fn clear_selection_menu(
 }
 
 pub fn spawn_selection_menu(commands: &mut Commands, tower: &Tower) {
-    let center = selection_menu_center();
-    let x = center.x;
-    let y = center.y;
     let title = format!("{} {}", tower.grade.name(), tower.gem.name());
     let action = match tower.grade.next() {
         Some(next) => format!("Upgrade to {}", next.name()),
@@ -203,66 +205,13 @@ pub fn spawn_selection_menu(commands: &mut Commands, tower: &Tower) {
         tower.gem.effect(tower.grade),
     );
 
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.12, 0.13, 0.14), Vec2::new(240.0, 226.0)),
-        Transform::from_xyz(x, y, 120.0),
-        SelectionMenu,
-        GameWorld,
-    ));
-
-    commands.spawn((
-        Text2d::new(title),
-        TextFont {
-            font_size: 18.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.94, 0.95, 0.95)),
-        Transform::from_xyz(x, y + 86.0, 130.0),
-        SelectionMenu,
-        GameWorld,
-    ));
-
-    commands.spawn((
-        Text2d::new(stats),
-        TextFont {
-            font_size: 15.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.80, 0.84, 0.86)),
-        Transform::from_xyz(x, y + 24.0, 130.0),
-        SelectionMenu,
-        GameWorld,
-    ));
-
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.20, 0.25, 0.28), Vec2::new(176.0, 46.0)),
-        Transform::from_xyz(upgrade_button_center().x, upgrade_button_center().y, 130.0),
-        SelectionMenu,
-        UpgradeButton,
-        GameWorld,
-    ));
-
-    commands.spawn((
-        Text2d::new(action),
-        TextFont {
-            font_size: 16.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.96, 0.96, 0.92)),
-        Transform::from_xyz(
-            upgrade_button_center().x,
-            upgrade_button_center().y - 4.0,
-            140.0,
-        ),
-        SelectionMenu,
-        GameWorld,
-    ));
+    spawn_info_panel(commands, &title, &stats);
+    spawn_action_bar(commands, &action);
 }
 
 /// Read-only stat panel for a gem offer (before placement). Shows the same stats
 /// as a placed tower at Chipped grade, but without the upgrade button.
 pub fn spawn_gem_info(commands: &mut Commands, gem: GemKind) {
-    let center = selection_menu_center();
     let stats = gem.chipped_stats();
     let body = stats_text(
         stats.damage,
@@ -271,34 +220,87 @@ pub fn spawn_gem_info(commands: &mut Commands, gem: GemKind) {
         gem.effect(GemGrade::Chipped),
     );
 
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.12, 0.13, 0.14), Vec2::new(240.0, 150.0)),
-        Transform::from_xyz(center.x, center.y, 120.0),
-        SelectionMenu,
-        GameWorld,
-    ));
-    commands.spawn((
-        Text2d::new(format!("Chipped {}", gem.name())),
-        TextFont {
-            font_size: 18.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.94, 0.95, 0.95)),
-        Transform::from_xyz(center.x, center.y + 48.0, 130.0),
-        SelectionMenu,
-        GameWorld,
-    ));
-    commands.spawn((
-        Text2d::new(body),
-        TextFont {
-            font_size: 15.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.80, 0.84, 0.86)),
-        Transform::from_xyz(center.x, center.y - 14.0, 130.0),
-        SelectionMenu,
-        GameWorld,
-    ));
+    spawn_info_panel(commands, &format!("Chipped {}", gem.name()), &body);
+}
+
+fn spawn_info_panel(commands: &mut Commands, title: &str, body: &str) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(68),
+                right: px(16),
+                width: px(276),
+                padding: UiRect::all(px(14)),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(8),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.08, 0.09, 0.10, 0.94)),
+            SelectionMenu,
+            GameWorld,
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new(title.to_string()),
+                TextFont {
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.94, 0.95, 0.95)),
+            ));
+            panel.spawn((
+                Text::new(body.to_string()),
+                TextFont {
+                    font_size: 15.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.80, 0.84, 0.86)),
+            ));
+        });
+}
+
+fn spawn_action_bar(commands: &mut Commands, action: &str) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: px(0),
+                left: px(0),
+                width: percent(100),
+                height: px(86),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.035, 0.04, 0.045, 0.95)),
+            SelectionMenu,
+            GameWorld,
+        ))
+        .with_children(|bar| {
+            bar.spawn((
+                Button,
+                Node {
+                    width: px(190),
+                    height: px(46),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.18, 0.23, 0.24)),
+                UpgradeButton,
+            ))
+            .with_children(|button| {
+                button.spawn((
+                    Text::new(action.to_string()),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.96, 0.96, 0.92)),
+                ));
+            });
+        });
 }
 
 fn stats_text(damage: f32, range: f32, cooldown: f32, effect: GemEffect) -> String {
@@ -312,7 +314,7 @@ fn stats_text(damage: f32, range: f32, cooldown: f32, effect: GemEffect) -> Stri
     )
 }
 
-pub fn update_top_bar(game: Res<Game>, mut bar: Query<&mut Text2d, With<TopBarText>>) {
+pub fn update_top_bar(game: Res<Game>, mut bar: Query<&mut Text, With<TopBarText>>) {
     if game.screen != AppScreen::Playing {
         return;
     }
@@ -321,7 +323,7 @@ pub fn update_top_bar(game: Res<Game>, mut bar: Query<&mut Text2d, With<TopBarTe
         return;
     };
 
-    text.0 = format!(
+    **text = format!(
         "Wave {}        Lives {}        Coins {}",
         game.round,
         game.lives.max(0),
@@ -412,24 +414,8 @@ pub fn update_hud(game: Res<Game>, board: Res<Board>, mut hud: Query<&mut Text2d
     );
 }
 
-pub fn upgrade_button_center() -> Vec2 {
-    selection_menu_center() + Vec2::new(0.0, -80.0)
-}
-
-pub fn is_upgrade_button_click(world_pos: Vec2) -> bool {
-    let center = upgrade_button_center();
-    world_pos.x >= center.x - 88.0
-        && world_pos.x <= center.x + 88.0
-        && world_pos.y >= center.y - 23.0
-        && world_pos.y <= center.y + 23.0
-}
-
 pub fn tower_sprite_size(grade: GemGrade) -> Vec2 {
     Vec2::splat(CELL_SIZE * 0.58 * grade.size_multiplier())
-}
-
-fn selection_menu_center() -> Vec2 {
-    Vec2::new(450.0, 82.0)
 }
 
 fn spawn_board_tiles(commands: &mut Commands, board: &Board) {
