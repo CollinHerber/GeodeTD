@@ -101,13 +101,21 @@ jobs:
       - name: Install wasm-bindgen-cli (matching Cargo.lock)
         if: steps.version.outputs.release == 'true'
         run: |
+          set -eu
+          # wasm-bindgen-cli must match the wasm-bindgen lib compiled into the
+          # .wasm, or the bundle step fails with a schema mismatch — so pin it.
           WBVER="$(grep -A1 'name = "wasm-bindgen"' Cargo.lock | grep '^version' | head -1 | sed -E 's/.*"(.*)".*/\1/')"
-          echo "wasm-bindgen version: ${WBVER:-latest}"
-          if [ -n "$WBVER" ]; then
-            cargo binstall -y "wasm-bindgen-cli@${WBVER}"
-          else
-            cargo binstall -y wasm-bindgen-cli
+          if [ -z "$WBVER" ]; then
+            echo "Could not determine wasm-bindgen version from Cargo.lock" >&2
+            exit 1
           fi
+          echo "Installing wasm-bindgen-cli ${WBVER}"
+          # Prefer a prebuilt binary; fall back to a source build if binstall
+          # can't find one for this exact version.
+          cargo binstall -y --force "wasm-bindgen-cli@${WBVER}" \
+            || cargo install --force --locked "wasm-bindgen-cli@${WBVER}"
+          # Fail here (not at the bundle step) if the binary still isn't on PATH.
+          wasm-bindgen --version
 
       - name: Build (WASM release)
         if: steps.version.outputs.release == 'true'

@@ -1041,6 +1041,8 @@ Enemies must travel through each numbered point before reaching the end.\n\
 Towers cannot block the route, but they can bend it.\n\
 Click a tower to upgrade it by sacrificing a matching duplicate.\n\
 Each enemy killed grants one coin.\n\
+Watch the left panel: swift waves rush in, flying waves skip the maze,\n\
+and every 20th round sends a single high-health boss.\n\
 Use the mouse wheel to zoom, and hold left click to pan."
 }
 
