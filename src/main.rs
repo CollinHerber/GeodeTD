@@ -25,7 +25,7 @@ use input::{
 };
 use ui::{
     handle_escape_menu_buttons, handle_menu_clicks, setup, toggle_escape_menu, update_hud,
-    update_offer_visuals, update_top_bar,
+    update_offer_visuals, update_round_info, update_top_bar,
 };
 use wave::{move_enemies, run_wave, update_wave_countdown};
 
@@ -94,7 +94,12 @@ fn main() {
         )
         .add_systems(
             Update,
-            (update_offer_visuals, update_hud, update_top_bar)
+            (
+                update_offer_visuals,
+                update_hud,
+                update_top_bar,
+                update_round_info,
+            )
                 .chain()
                 .in_set(GameSet::Ui),
         )

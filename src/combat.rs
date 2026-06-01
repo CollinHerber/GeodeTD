@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::collections::HashSet;
 
 use crate::components::{Enemy, GameWorld, Poison, ShotEffect, Slowed, Tower};
-use crate::game::{AppScreen, Game};
+use crate::game::{AppScreen, Game, RoundKind};
 use crate::gem::GemEffect;
 
 /// How far chain lightning can arc between successive enemies.
@@ -237,8 +237,19 @@ pub fn update_enemy_visuals(
         } else if poisoned.is_some() {
             Color::srgb(0.42, 0.74, 0.26)
         } else {
-            Color::srgb(0.85, 0.12 + 0.42 * health_percent, 0.13)
+            enemy_tint(enemy.kind, health_percent)
         };
+    }
+}
+
+/// Base tint per round kind, brightened toward full health so damage still reads
+/// as the enemy darkening regardless of its wave type.
+fn enemy_tint(kind: RoundKind, health_percent: f32) -> Color {
+    match kind {
+        RoundKind::Normal => Color::srgb(0.85, 0.12 + 0.42 * health_percent, 0.13),
+        RoundKind::Swift => Color::srgb(0.98, 0.48 + 0.34 * health_percent, 0.12),
+        RoundKind::Flying => Color::srgb(0.36, 0.62 + 0.28 * health_percent, 0.92),
+        RoundKind::Boss => Color::srgb(0.52 + 0.30 * health_percent, 0.10, 0.66),
     }
 }
 

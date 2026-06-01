@@ -4,13 +4,13 @@ use std::collections::HashMap;
 
 use crate::board::Board;
 use crate::components::{
-    CheckpointMarker, EscapeMenu, EscapeMenuAction, EscapeMenuButton, EscapeMenuInfo, GameWorld,
-    HomeScreen, HowToPlayScreen, HudText, MenuAction, MenuButton, ModeSelectScreen, OfferButton,
-    OfferLabel, OfferVisual, PathMarker, SelectionMenu, SettingsScreen, SpeedButton, SpeedText,
-    TopBarText, Tower, UpgradeButton,
+    CheckpointMarker, Enemy, EscapeMenu, EscapeMenuAction, EscapeMenuButton, EscapeMenuInfo,
+    GameWorld, HomeScreen, HowToPlayScreen, HudText, MenuAction, MenuButton, ModeSelectScreen,
+    OfferButton, OfferLabel, OfferVisual, PathMarker, RoundInfoBody, RoundInfoTitle, SelectionMenu,
+    SettingsScreen, SpeedButton, SpeedText, TopBarText, Tower, UpgradeButton,
 };
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
-use crate::game::{AppScreen, Game, GameMode, Phase};
+use crate::game::{AppScreen, Game, GameMode, Phase, RoundPlan};
 use crate::gem::{GRADE_LADDER, GemEffect, GemGrade, GemKind};
 use crate::gem_visual::GemImages;
 use crate::grid::{GridPos, finish_pos, grid_to_world, start_pos};
@@ -165,6 +165,47 @@ fn spawn_game_scene(commands: &mut Commands, board: &Board) {
     spawn_checkpoint_markers(commands, &board.checkpoints);
     spawn_play_ui(commands);
     spawn_offer_bar(commands);
+    spawn_round_info_panel(commands);
+}
+
+/// Persistent left-side panel describing the current round: its kind, head count,
+/// and per-enemy health and speed. Filled in each frame by [`update_round_info`].
+fn spawn_round_info_panel(commands: &mut Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(160),
+                left: px(16),
+                width: px(236),
+                padding: UiRect::all(px(14)),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(8),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.06, 0.07, 0.085, 0.94)),
+            GameWorld,
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.94, 0.95, 0.95)),
+                RoundInfoTitle,
+            ));
+            panel.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.80, 0.84, 0.86)),
+                RoundInfoBody,
+            ));
+        });
 }
 
 fn spawn_play_ui(commands: &mut Commands) {
@@ -407,6 +448,47 @@ pub fn update_top_bar(
     if let Ok(mut speed) = speed.single_mut() {
         **speed = format!("{}x", game.speed);
     }
+}
+
+pub fn update_round_info(
+    game: Res<Game>,
+    enemies: Query<(), With<Enemy>>,
+    mut title: Query<(&mut Text, &mut TextColor), With<RoundInfoTitle>>,
+    mut body: Query<&mut Text, (With<RoundInfoBody>, Without<RoundInfoTitle>)>,
+) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    let plan = RoundPlan::for_round(game.round);
+
+    if let Ok((mut text, mut color)) = title.single_mut() {
+        **text = format!("Round {} — {}", game.round, plan.kind.label());
+        color.0 = plan.kind.accent();
+    }
+
+    let Ok(mut text) = body.single_mut() else {
+        return;
+    };
+
+    // During the wave, show how many are still unspawned or alive so the player can
+    // gauge how much of the round is left.
+    let progress = if game.phase == Phase::Wave {
+        let remaining = game.pending_enemies as usize + enemies.iter().count();
+        format!("\nRemaining: {} / {}", remaining, plan.count)
+    } else {
+        String::new()
+    };
+
+    **text = format!(
+        "{}\n\nEnemies: {}\nHealth: {:.0} each\nSpeed: {:.0}\nMovement: {}{}",
+        plan.kind.description(),
+        plan.count,
+        plan.health,
+        plan.speed,
+        if plan.flying { "Flying" } else { "Grounded" },
+        progress,
+    );
 }
 
 pub fn update_offer_visuals(

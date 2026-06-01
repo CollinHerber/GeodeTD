@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::game::RoundKind;
 use crate::gem::{GemGrade, GemKind};
 
 #[derive(Component)]
@@ -29,6 +30,9 @@ pub struct Enemy {
     pub health: f32,
     pub max_health: f32,
     pub speed: f32,
+    pub kind: RoundKind,
+    /// Flying enemies ignore the maze path and head straight for the finish.
+    pub flying: bool,
 }
 
 /// Temporary movement slow applied by Sapphire towers. Reapplying refreshes it.
@@ -56,6 +60,14 @@ pub struct HudText;
 
 #[derive(Component)]
 pub struct TopBarText;
+
+/// Title line of the left-side round information panel.
+#[derive(Component)]
+pub struct RoundInfoTitle;
+
+/// Body (stats) of the left-side round information panel.
+#[derive(Component)]
+pub struct RoundInfoBody;
 
 #[derive(Component)]
 pub struct SpeedButton;

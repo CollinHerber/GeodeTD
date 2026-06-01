@@ -111,9 +111,21 @@ impl Game {
 
     pub fn begin_wave(&mut self) {
         self.phase = Phase::Wave;
-        self.pending_enemies = 5 + self.round * 2;
+        let plan = RoundPlan::for_round(self.round);
+        self.pending_enemies = plan.count;
         self.spawn_timer = ready_timer(0.65, TimerMode::Repeating);
-        self.message = format!("Wave {} is moving through the checkpoints.", self.round);
+        self.message = match plan.kind {
+            RoundKind::Normal => {
+                format!("Wave {} is moving through the checkpoints.", self.round)
+            }
+            RoundKind::Swift => format!("Wave {} is fast but fragile — hold fast.", self.round),
+            RoundKind::Flying => {
+                format!("Wave {} takes to the air and ignores the maze.", self.round)
+            }
+            RoundKind::Boss => {
+                format!("Boss wave {}! A single massive foe approaches.", self.round)
+            }
+        };
     }
 
     pub fn begin_build_round(&mut self) {
@@ -121,10 +133,19 @@ impl Game {
         self.round += 1;
         self.refresh_offers();
         self.upgrade_source = None;
-        self.message = format!(
-            "Round {}: place all five chipped gems, then choose one to keep.",
-            self.round
-        );
+        let kind = RoundPlan::for_round(self.round).kind;
+        self.message = if kind == RoundKind::Normal {
+            format!(
+                "Round {}: place all five chipped gems, then choose one to keep.",
+                self.round
+            )
+        } else {
+            format!(
+                "Round {} ({} ahead): place all five chipped gems, then choose one to keep.",
+                self.round,
+                kind.label()
+            )
+        };
     }
 
     pub fn reset_for_mode(&mut self, mode: GameMode) {
@@ -175,6 +196,123 @@ pub enum Phase {
     Build,
     Countdown,
     Wave,
+}
+
+/// The flavor of a wave. Derived purely from the round number so the info panel
+/// and the spawner always agree on what is coming.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RoundKind {
+    Normal,
+    Swift,
+    Flying,
+    Boss,
+}
+
+impl RoundKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            RoundKind::Normal => "Standard Wave",
+            RoundKind::Swift => "Swift Wave",
+            RoundKind::Flying => "Flying Wave",
+            RoundKind::Boss => "Boss Wave",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            RoundKind::Normal => "A standard column of grounded foes.",
+            RoundKind::Swift => "Fast but fragile — they sprint the maze.",
+            RoundKind::Flying => "Ignores the maze and flies straight across.",
+            RoundKind::Boss => "A single massive foe with enormous health.",
+        }
+    }
+
+    /// Accent color used for the info-panel title and as the enemy's base tint.
+    pub fn accent(self) -> Color {
+        match self {
+            RoundKind::Normal => Color::srgb(0.90, 0.40, 0.34),
+            RoundKind::Swift => Color::srgb(0.98, 0.72, 0.20),
+            RoundKind::Flying => Color::srgb(0.46, 0.82, 0.92),
+            RoundKind::Boss => Color::srgb(0.80, 0.40, 0.92),
+        }
+    }
+}
+
+/// Resolved per-enemy stats and head count for a single round. Computed from the
+/// round number in one place ([`RoundPlan::for_round`]) so spawning and the UI
+/// never drift apart.
+#[derive(Clone, Copy)]
+pub struct RoundPlan {
+    pub kind: RoundKind,
+    pub count: u32,
+    pub health: f32,
+    pub speed: f32,
+    pub flying: bool,
+}
+
+impl RoundPlan {
+    pub fn for_round(round: u32) -> Self {
+        let mut base_count = 5 + round * 2;
+        let mut base_health = 30.0 + round as f32 * 8.0;
+        let mut base_speed = 72.0 + round as f32 * 3.0;
+
+        match round {
+            1 => {
+                base_count = 5;
+                base_health *= 0.75;
+                base_speed *= 0.92;
+            }
+            2 => {
+                base_count = 7;
+                base_health *= 0.85;
+                base_speed *= 0.95;
+            }
+            _ => {}
+        }
+
+        // Boss every 20 rounds takes precedence; flying and swift cadences fill in
+        // the gaps between standard waves.
+        let kind = if round.is_multiple_of(20) {
+            RoundKind::Boss
+        } else if round.is_multiple_of(7) {
+            RoundKind::Flying
+        } else if round.is_multiple_of(5) {
+            RoundKind::Swift
+        } else {
+            RoundKind::Normal
+        };
+
+        match kind {
+            RoundKind::Normal => Self {
+                kind,
+                count: base_count,
+                health: base_health,
+                speed: base_speed,
+                flying: false,
+            },
+            RoundKind::Swift => Self {
+                kind,
+                count: base_count,
+                health: base_health * 0.5,
+                speed: base_speed * 1.9,
+                flying: false,
+            },
+            RoundKind::Flying => Self {
+                kind,
+                count: base_count,
+                health: base_health * 0.55,
+                speed: base_speed * 0.7,
+                flying: true,
+            },
+            RoundKind::Boss => Self {
+                kind,
+                count: 1,
+                health: base_health * 28.0,
+                speed: base_speed * 0.55,
+                flying: false,
+            },
+        }
+    }
 }
 
 pub fn random_offers(rng: &mut OfferRng) -> [Option<GemKind>; OFFER_COUNT] {
