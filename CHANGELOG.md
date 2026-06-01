@@ -1,8 +1,12 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+## [0.1.0] - 2026-06-01
 
-This file is generated automatically from Conventional Commits by
-[git-cliff](https://git-cliff.org/) on every release (push to `main`). Do not edit
-it by hand — write good commit messages instead (see the commit conventions in the
-project README and `cliff.toml`).
+### Bug Fixes
+- Fix cliff toml (c6f5dff)
+
+### Features
+- Add in gem visuals (fb2d11a)
+
+
