@@ -15,6 +15,7 @@ pub struct Game {
     pub coins: u32,
     pub offers: [Option<GemKind>; OFFER_COUNT],
     pub selected_offer: Option<usize>,
+    pub placed_starters: [Option<Entity>; OFFER_COUNT],
     pub pending_enemies: u32,
     pub spawn_timer: Timer,
     pub countdown_timer: Timer,
@@ -43,11 +44,12 @@ impl Game {
             coins: 0,
             offers: random_offers(&mut rng),
             selected_offer: None,
+            placed_starters: [None; OFFER_COUNT],
             pending_enemies: 0,
             spawn_timer: ready_timer(0.65, TimerMode::Repeating),
             countdown_timer: Timer::from_seconds(WAVE_COUNTDOWN_SECONDS, TimerMode::Once),
             rng,
-            message: "Pick one of five chipped gems and place it.".to_string(),
+            message: "Place all five chipped gems, then choose one to keep.".to_string(),
             selected_tower: None,
             upgrade_source: None,
             paused: false,
@@ -74,11 +76,24 @@ impl Game {
     pub fn refresh_offers(&mut self) {
         self.offers = random_offers(&mut self.rng);
         self.selected_offer = None;
+        self.placed_starters = [None; OFFER_COUNT];
     }
 
     pub fn clear_offers(&mut self) {
         self.offers = [None; OFFER_COUNT];
         self.selected_offer = None;
+        self.placed_starters = [None; OFFER_COUNT];
+    }
+
+    pub fn all_starters_placed(&self) -> bool {
+        self.placed_starters.iter().all(Option::is_some)
+    }
+
+    pub fn placed_starter_count(&self) -> usize {
+        self.placed_starters
+            .iter()
+            .filter(|starter| starter.is_some())
+            .count()
     }
 
     pub fn begin_countdown(&mut self, gem: GemKind) {
@@ -88,7 +103,7 @@ impl Game {
         self.upgrade_source = None;
         self.countdown_timer = Timer::from_seconds(WAVE_COUNTDOWN_SECONDS, TimerMode::Once);
         self.message = format!(
-            "Placed a Chipped {}. Wave starts in {:.0} seconds.",
+            "Kept a Chipped {}. Wave starts in {:.0} seconds.",
             gem.name(),
             WAVE_COUNTDOWN_SECONDS
         );
@@ -106,7 +121,10 @@ impl Game {
         self.round += 1;
         self.refresh_offers();
         self.upgrade_source = None;
-        self.message = format!("Round {}: pick one of five chipped gems.", self.round);
+        self.message = format!(
+            "Round {}: place all five chipped gems, then choose one to keep.",
+            self.round
+        );
     }
 
     pub fn reset_for_mode(&mut self, mode: GameMode) {
@@ -121,7 +139,10 @@ impl Game {
         self.upgrade_source = None;
         self.paused = false;
         self.speed = 1;
-        self.message = format!("{} mode: pick one of five chipped gems.", mode.name());
+        self.message = format!(
+            "{} mode: place all five chipped gems, then choose one to keep.",
+            mode.name()
+        );
     }
 }
 

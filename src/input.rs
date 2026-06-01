@@ -4,7 +4,10 @@ use bevy::window::PrimaryWindow;
 use std::time::Duration;
 
 use crate::board::{Board, find_complete_path};
-use crate::components::{GameWorld, OfferButton, PathMarker, SelectionMenu, SpeedButton, Tower};
+use crate::components::{
+    GameWorld, OfferButton, PathMarker, SelectionMenu, SpeedButton, StarterCandidate, StarterWall,
+    Tower,
+};
 use crate::game::{AppScreen, Game, Phase};
 use crate::gem::GemGrade;
 use crate::gem_visual::GemImages;
@@ -15,7 +18,7 @@ use crate::ui::{
 };
 
 const MIN_CAMERA_SCALE: f32 = 0.45;
-const MAX_CAMERA_SCALE: f32 = 2.8;
+const MAX_CAMERA_SCALE: f32 = 5.6;
 const ZOOM_STEP: f32 = 0.88;
 const PIXELS_PER_SCROLL_LINE: f32 = 16.0;
 const PAN_DRAG_THRESHOLD: f32 = 4.0;
@@ -189,6 +192,7 @@ pub fn place_or_select(
     menu_items: Query<Entity, With<SelectionMenu>>,
     mut towers: Query<(Entity, &mut Tower, &mut Sprite)>,
     tower_positions: Query<(Entity, &Transform), With<Tower>>,
+    starter_candidates: Query<&StarterCandidate>,
     gem_images: Res<GemImages>,
 ) {
     if game.screen != AppScreen::Playing || game.paused || !buttons.just_released(MouseButton::Left)
@@ -206,7 +210,20 @@ pub fn place_or_select(
     };
 
     if let Some(tower_entity) = tower_at_world_position(world_pos, &tower_positions) {
-        if game.phase == Phase::Build && game.upgrade_source.is_some() {
+        let is_starter_candidate = starter_candidates.get(tower_entity).is_ok();
+        if game.phase == Phase::Build && game.all_starters_placed() && is_starter_candidate {
+            keep_starter(
+                &mut commands,
+                &mut game,
+                &mut board,
+                &path_markers,
+                &menu_items,
+                &mut towers,
+                tower_entity,
+            );
+        } else if game.phase == Phase::Build && is_starter_candidate {
+            inspect_starter_candidate(&mut commands, &mut game, &menu_items, &towers, tower_entity);
+        } else if game.phase == Phase::Build && game.upgrade_source.is_some() {
             complete_upgrade(
                 &mut commands,
                 &mut game,
@@ -312,6 +329,69 @@ fn select_tower(
     spawn_selection_menu(commands, tower);
 }
 
+fn inspect_starter_candidate(
+    commands: &mut Commands,
+    game: &mut Game,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+    towers: &Query<(Entity, &mut Tower, &mut Sprite)>,
+    tower_entity: Entity,
+) {
+    let Ok((_, tower, _)) = towers.get(tower_entity) else {
+        return;
+    };
+
+    game.selected_tower = Some(tower_entity);
+    game.selected_offer = None;
+    game.upgrade_source = None;
+    game.message = format!(
+        "Placed starter {} of {}. Place the rest before choosing one.",
+        game.placed_starter_count(),
+        crate::constants::OFFER_COUNT
+    );
+    clear_selection_menu(commands, menu_items);
+    spawn_gem_info(commands, tower.gem);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn keep_starter(
+    commands: &mut Commands,
+    game: &mut Game,
+    board: &mut Board,
+    path_markers: &Query<Entity, With<PathMarker>>,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+    towers: &mut Query<(Entity, &mut Tower, &mut Sprite)>,
+    kept_entity: Entity,
+) {
+    let Ok((_, kept_tower, _)) = towers.get(kept_entity) else {
+        game.message = "That starter is no longer available.".to_string();
+        return;
+    };
+    let kept_gem = kept_tower.gem;
+
+    let starters = game.placed_starters;
+    for starter in starters.iter().flatten().copied() {
+        if starter == kept_entity {
+            commands.entity(starter).remove::<StarterCandidate>();
+            continue;
+        }
+
+        if let Some(pos) = grid_pos_for_entity(board, starter) {
+            commands.entity(starter).despawn();
+            board.towers.remove(&pos);
+            board.walls.insert(pos);
+            spawn_starter_wall(commands, pos);
+        }
+    }
+
+    board.recalculate_path();
+    refresh_path_markers(commands, path_markers, &board.path);
+    clear_selection_menu(commands, menu_items);
+    spawn_selection_menu(commands, kept_tower);
+    game.begin_countdown(kept_gem);
+    game.selected_tower = Some(kept_entity);
+    game.upgrade_source = None;
+}
+
 #[allow(clippy::too_many_arguments)]
 fn complete_upgrade(
     commands: &mut Commands,
@@ -399,6 +479,16 @@ fn place_tower(
         game.message = "Select a chipped gem before placing a tower.".to_string();
         return;
     };
+    let Some(offer_index) = game.selected_offer else {
+        game.message = "Select a chipped gem before placing a tower.".to_string();
+        return;
+    };
+
+    if game.placed_starters[offer_index].is_some() {
+        game.message = "That chipped gem has already been placed.".to_string();
+        game.selected_offer = None;
+        return;
+    }
 
     let mut occupied = board.occupied_cells();
     occupied.insert(grid_pos);
@@ -408,17 +498,30 @@ fn place_tower(
         return;
     };
 
-    let tower_entity = spawn_tower(commands, grid_pos, gem, gem_images);
+    let tower_entity = spawn_tower(commands, grid_pos, gem, gem_images, Some(offer_index));
     board.towers.insert(grid_pos, tower_entity);
     board.path = new_path;
     refresh_path_markers(commands, path_markers, &board.path);
     clear_selection_menu(commands, menu_items);
-    game.begin_countdown(gem);
     game.selected_tower = Some(tower_entity);
     game.selected_offer = None;
+    game.offers[offer_index] = None;
+    game.placed_starters[offer_index] = Some(tower_entity);
     game.upgrade_source = None;
-    let preview_tower = chipped_tower(gem);
-    spawn_selection_menu(commands, &preview_tower);
+
+    let placed = game.placed_starter_count();
+    if game.all_starters_placed() {
+        game.message = "All five starters are placed. Click the one to keep.".to_string();
+        let preview_tower = chipped_tower(gem);
+        spawn_gem_info(commands, preview_tower.gem);
+    } else {
+        game.message = format!(
+            "Placed starter {} of {}. Select and place the next chipped gem.",
+            placed,
+            crate::constants::OFFER_COUNT
+        );
+        spawn_gem_info(commands, gem);
+    }
 }
 
 fn spawn_tower(
@@ -426,21 +529,44 @@ fn spawn_tower(
     pos: crate::grid::GridPos,
     gem: crate::gem::GemKind,
     gem_images: &GemImages,
+    starter_index: Option<usize>,
 ) -> Entity {
     let tower = chipped_tower(gem);
+    let mut entity = commands.spawn((
+        Sprite {
+            image: gem_images.handle(gem, GemGrade::Chipped),
+            custom_size: Some(tower_sprite_size(GemGrade::Chipped)),
+            ..default()
+        },
+        Transform::from_translation(grid_to_world(pos).extend(5.0)),
+        tower,
+        GameWorld,
+    ));
 
-    commands
-        .spawn((
-            Sprite {
-                image: gem_images.handle(gem, GemGrade::Chipped),
-                custom_size: Some(tower_sprite_size(GemGrade::Chipped)),
-                ..default()
-            },
-            Transform::from_translation(grid_to_world(pos).extend(5.0)),
-            tower,
-            GameWorld,
-        ))
-        .id()
+    if starter_index.is_some() {
+        entity.insert(StarterCandidate);
+    }
+
+    entity.id()
+}
+
+fn spawn_starter_wall(commands: &mut Commands, pos: crate::grid::GridPos) {
+    commands.spawn((
+        Sprite::from_color(
+            Color::srgb(0.35, 0.36, 0.34),
+            Vec2::splat(crate::constants::CELL_SIZE * 0.78),
+        ),
+        Transform::from_translation(grid_to_world(pos).extend(4.0)),
+        StarterWall,
+        GameWorld,
+    ));
+}
+
+fn grid_pos_for_entity(board: &Board, entity: Entity) -> Option<crate::grid::GridPos> {
+    board
+        .towers
+        .iter()
+        .find_map(|(pos, tower)| (*tower == entity).then_some(*pos))
 }
 
 fn chipped_tower(gem: crate::gem::GemKind) -> Tower {

@@ -18,6 +18,7 @@ pub const CHECKPOINT_COUNT: usize = 4;
 #[derive(Resource)]
 pub struct Board {
     pub towers: HashMap<GridPos, Entity>,
+    pub walls: HashSet<GridPos>,
     pub path: Vec<GridPos>,
     pub checkpoints: Vec<GridPos>,
 }
@@ -42,6 +43,7 @@ impl Board {
 
         Self {
             towers: HashMap::new(),
+            walls: HashSet::new(),
             path,
             checkpoints,
         }
@@ -52,7 +54,9 @@ impl Board {
     }
 
     pub fn occupied_cells(&self) -> HashSet<GridPos> {
-        self.towers.keys().copied().collect()
+        let mut occupied = self.walls.clone();
+        occupied.extend(self.towers.keys().copied());
+        occupied
     }
 
     pub fn protected_cells(&self) -> HashSet<GridPos> {

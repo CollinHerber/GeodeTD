@@ -1,4 +1,4 @@
-pub const PLAY_AREA_SCALE: i32 = 2;
+pub const PLAY_AREA_SCALE: i32 = 4;
 pub const BASE_GRID_COLUMNS: i32 = 29;
 pub const BASE_GRID_ROWS: i32 = 17;
 pub const GRID_COLUMNS: i32 = BASE_GRID_COLUMNS * PLAY_AREA_SCALE;

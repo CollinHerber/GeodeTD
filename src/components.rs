@@ -18,6 +18,12 @@ pub struct Tower {
 }
 
 #[derive(Component)]
+pub struct StarterCandidate;
+
+#[derive(Component)]
+pub struct StarterWall;
+
+#[derive(Component)]
 pub struct Enemy {
     pub next_path_index: usize,
     pub health: f32,

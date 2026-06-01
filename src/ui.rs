@@ -424,6 +424,8 @@ pub fn update_offer_visuals(
         let selected = game.selected_offer == Some(offer.index) && game.phase == Phase::Build;
         color.0 = if selected {
             Color::srgb(0.20, 0.28, 0.28)
+        } else if game.placed_starters[offer.index].is_some() {
+            Color::srgba(0.11, 0.13, 0.13, 0.94)
         } else {
             Color::srgba(0.08, 0.09, 0.10, 0.94)
         };
@@ -443,15 +445,17 @@ pub fn update_offer_visuals(
     }
 
     for (label, mut text, mut color) in &mut offer_labels {
-        **text = match game.offers[label.index] {
-            Some(gem) => format!("Chipped\n{}", gem.name()),
-            None => "--".to_string(),
+        **text = match (game.offers[label.index], game.placed_starters[label.index]) {
+            (Some(gem), _) => format!("Chipped\n{}", gem.name()),
+            (None, Some(_)) => "Placed".to_string(),
+            (None, None) => "--".to_string(),
         };
-        color.0 = if game.offers[label.index].is_some() {
-            Color::srgb(0.93, 0.94, 0.95)
-        } else {
-            Color::srgb(0.45, 0.47, 0.48)
-        };
+        color.0 =
+            if game.offers[label.index].is_some() || game.placed_starters[label.index].is_some() {
+                Color::srgb(0.93, 0.94, 0.95)
+            } else {
+                Color::srgb(0.45, 0.47, 0.48)
+            };
     }
 }
 
@@ -477,10 +481,17 @@ pub fn update_hud(game: Res<Game>, board: Res<Board>, mut hud: Query<&mut Text2d
     } else {
         String::new()
     };
+    let starter_prompt = if game.phase == Phase::Build && game.all_starters_placed() {
+        "      Click a placed starter to keep it"
+    } else if game.phase == Phase::Build {
+        "      Place all five starters"
+    } else {
+        ""
+    };
     let prompt = if game.upgrade_source.is_some() {
         "      Upgrade: click a matching duplicate to sacrifice"
     } else {
-        ""
+        starter_prompt
     };
 
     text.0 = format!(
@@ -942,7 +953,8 @@ fn spawn_how_to_play_screen(commands: &mut Commands) {
 }
 
 fn how_to_play_text() -> &'static str {
-    "Pick one chipped gem each round and place it on the board.\n\
+    "Place all five chipped gems each build round, then click one to keep.\n\
+The four unpicked starters become stone walls that bend enemy pathing.\n\
 Enemies must travel through each numbered point before reaching the end.\n\
 Towers cannot block the route, but they can bend it.\n\
 Click a tower to upgrade it by sacrificing a matching duplicate.\n\

@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+const TOWER_RANGE_MULTIPLIER: f32 = 1.5;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum GemKind {
     Ruby,
@@ -239,7 +241,7 @@ impl TowerStats {
     pub fn new(damage: f32, range: f32, cooldown: f32) -> Self {
         Self {
             damage,
-            range,
+            range: range * TOWER_RANGE_MULTIPLIER,
             cooldown,
         }
     }
