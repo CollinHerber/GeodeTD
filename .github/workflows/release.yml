@@ -1,8 +1,8 @@
 name: Release
 
 # On push to main: derive the next semantic version from Conventional Commits,
-# generate a changelog, build the WASM/web release, publish a GitHub Release,
-# and deploy the HTML5 build to itch.io with Butler.
+# generate a changelog, build the WASM/web and native Windows releases, publish a
+# GitHub Release, and deploy to itch.io with Butler (html + exe channels).
 on:
   push:
     branches: [main]
@@ -16,22 +16,17 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  # Decide whether this push warrants a release and compute the version once, so
+  # the web and Windows jobs publish under the same tag.
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5.0.1
+      - uses: actions/checkout@v6
         with:
-          fetch-depth: 0 # full history + tags so git-cliff can version
-
-      # See ci.yml: these committed files target a local dev machine and break CI.
-      - name: Remove local-only toolchain config
-        run: rm -f rust-toolchain.toml .cargo/config.toml
-
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install git-cliff
-        run: cargo binstall -y git-cliff
+          fetch-depth: 0 # full history + tags so version detection works
 
       # Compute the next version from the commits since the last v-tag.
       #   breaking (type! or "BREAKING CHANGE") -> major
@@ -85,21 +80,80 @@ jobs:
           echo "release=true" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+  # Build the native Windows .exe on a real Windows runner (default MSVC target)
+  # and hand it to the release job as an artifact. Keeping the build here avoids
+  # cross-compilation/linker headaches; the itch push happens from the Linux job.
+  build-exe:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash # match the Linux jobs; windows runners ship Git Bash
+    steps:
+      - uses: actions/checkout@v6
+
+      # The committed rust-toolchain.toml pins stable-x86_64-pc-windows-gnu and
+      # .cargo/config.toml points the linker at a local w64devkit. Neither exists
+      # on CI, and both would force a broken GNU build — drop them so we get the
+      # runner's default MSVC toolchain.
+      - name: Remove local-only toolchain config
+        run: rm -f rust-toolchain.toml .cargo/config.toml
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Build (Windows release)
+        run: cargo build --release
+
+      - name: Stage exe
+        run: |
+          mkdir -p dist-exe
+          cp target/release/geode_td.exe dist-exe/
+          if [ -d assets ]; then cp -r assets dist-exe/assets; fi
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist-exe
+          if-no-files-found: error
+
+  # Build the web bundle, publish the GitHub Release, and push both the web and
+  # Windows builds to itch.io. Runs only after the Windows build succeeds so the
+  # release is consistent across channels.
+  release:
+    needs: [version, build-exe]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # full history + tags so git-cliff can generate notes
+
+      # See ci.yml: these committed files target a local dev machine and break CI.
+      - name: Remove local-only toolchain config
+        run: rm -f rust-toolchain.toml .cargo/config.toml
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install git-cliff
+        run: cargo binstall -y git-cliff
+
       - name: Write release notes
-        if: steps.version.outputs.release == 'true'
-        run: git cliff --unreleased --tag "${{ steps.version.outputs.version }}" --strip header -o RELEASE_NOTES.md
+        run: git cliff --unreleased --tag "${{ needs.version.outputs.version }}" --strip header -o RELEASE_NOTES.md
 
       - name: Install Rust (wasm)
-        if: steps.version.outputs.release == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
-      - uses: Swatinem/rust-cache@v2.8.2
-        if: steps.version.outputs.release == 'true'
+      - uses: Swatinem/rust-cache@v2.9.1
 
       - name: Install wasm-bindgen-cli (matching Cargo.lock)
-        if: steps.version.outputs.release == 'true'
         run: |
           set -eu
           # wasm-bindgen-cli must match the wasm-bindgen lib compiled into the
@@ -118,11 +172,9 @@ jobs:
           wasm-bindgen --version
 
       - name: Build (WASM release)
-        if: steps.version.outputs.release == 'true'
         run: cargo build --release --target wasm32-unknown-unknown --features bevy/webgl2
 
       - name: Bundle web build
-        if: steps.version.outputs.release == 'true'
         run: |
           mkdir -p dist
           wasm-bindgen --no-typescript --target web \
@@ -130,27 +182,38 @@ jobs:
             target/wasm32-unknown-unknown/release/geode_td.wasm
           cp web/index.html dist/index.html
           if [ -d assets ]; then cp -r assets dist/assets; fi
-          (cd dist && zip -r ../geode_td-web-${{ steps.version.outputs.version }}.zip .)
+          (cd dist && zip -r ../geode_td-web-${{ needs.version.outputs.version }}.zip .)
+
+      - name: Download Windows exe
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-exe
+          path: dist-exe
+
+      - name: Package Windows build
+        run: |
+          (cd dist-exe && zip -r ../geode_td-windows-${{ needs.version.outputs.version }}.zip .)
 
       - name: Create GitHub Release
-        if: steps.version.outputs.release == 'true'
-        uses: softprops/action-gh-release@v2.6.2
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: ${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.version.outputs.version }}
+          name: ${{ needs.version.outputs.version }}
           body_path: RELEASE_NOTES.md
-          files: geode_td-web-${{ steps.version.outputs.version }}.zip
+          files: |
+            geode_td-web-${{ needs.version.outputs.version }}.zip
+            geode_td-windows-${{ needs.version.outputs.version }}.zip
 
-      # Push the HTML5 directory (not the zip) so itch serves it as a playable
-      # web build. Butler reads BUTLER_API_KEY from the environment automatically.
+      # Push the HTML5 directory to the html channel and the Windows build to the
+      # exe channel. Butler reads BUTLER_API_KEY from the environment automatically.
       - name: Deploy to itch.io (Butler)
         # Secrets can't be referenced in a step `if:`, so the deploy config is
         # carried in via `env` and the presence check happens in the script body.
-        if: steps.version.outputs.release == 'true'
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
           ITCH_USER: ${{ secrets.ITCH_USER }}
           ITCH_GAME: ${{ secrets.ITCH_GAME }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           if [ -z "$BUTLER_API_KEY" ] || [ -z "$ITCH_USER" ] || [ -z "$ITCH_GAME" ]; then
             echo "itch.io secrets (BUTLER_API_KEY/ITCH_USER/ITCH_GAME) not all set; skipping deploy."
@@ -163,16 +226,15 @@ jobs:
           unzip -o butler.zip
           chmod +x butler
           ./butler -V
-          ./butler push ./dist "${ITCH_USER}/${ITCH_GAME}:html" \
-            --userversion "${{ steps.version.outputs.version }}"
+          ./butler push ./dist "${ITCH_USER}/${ITCH_GAME}:html" --userversion "${VERSION}"
+          ./butler push ./dist-exe "${ITCH_USER}/${ITCH_GAME}:exe" --userversion "${VERSION}"
 
       # Regenerate the full changelog including the new tag and commit it back.
       # The [skip ci] tag plus the chore() type (ignored by cliff) prevents this
       # commit from re-triggering a release.
       - name: Update CHANGELOG.md
-        if: steps.version.outputs.release == 'true'
         run: |
-          git cliff --tag "${{ steps.version.outputs.version }}" -o CHANGELOG.md
+          git cliff --tag "${{ needs.version.outputs.version }}" -o CHANGELOG.md
           if git diff --quiet -- CHANGELOG.md; then
             echo "CHANGELOG.md unchanged."
             exit 0
@@ -180,5 +242,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md
-          git commit -m "chore(release): ${{ steps.version.outputs.version }} [skip ci]"
+          git commit -m "chore(release): ${{ needs.version.outputs.version }} [skip ci]"
           git push origin HEAD:main
