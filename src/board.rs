@@ -3,11 +3,13 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::constants::{GRID_COLUMNS, GRID_ROWS};
+use crate::constants::{
+    BASE_GRID_COLUMNS, BASE_GRID_ROWS, GRID_COLUMNS, GRID_ROWS, PLAY_AREA_SCALE,
+};
 use crate::game::GameMode;
 use crate::grid::{
     DIAGONAL_COST, DIAGONAL_STEPS, GridPos, ORTHOGONAL_COST, ORTHOGONAL_STEPS, finish_pos,
-    start_pos,
+    scaled_grid_pos, start_pos,
 };
 use crate::rng::OfferRng;
 
@@ -172,10 +174,12 @@ fn heuristic(from: GridPos, to: GridPos) -> i32 {
 fn random_checkpoints(rng: &mut OfferRng) -> Vec<GridPos> {
     let mut checkpoints = Vec::with_capacity(CHECKPOINT_COUNT);
     let protected = HashSet::from([start_pos(), finish_pos()]);
+    let col_margin = 4 * PLAY_AREA_SCALE;
+    let row_margin = 2 * PLAY_AREA_SCALE;
 
     while checkpoints.len() < CHECKPOINT_COUNT {
-        let col = 4 + rng.next_index((GRID_COLUMNS - 8) as usize) as i32;
-        let row = 2 + rng.next_index((GRID_ROWS - 4) as usize) as i32;
+        let col = col_margin + rng.next_index((GRID_COLUMNS - col_margin * 2) as usize) as i32;
+        let row = row_margin + rng.next_index((GRID_ROWS - row_margin * 2) as usize) as i32;
         let pos = GridPos::new(col, row);
 
         if protected.contains(&pos) || checkpoints.contains(&pos) {
@@ -189,13 +193,13 @@ fn random_checkpoints(rng: &mut OfferRng) -> Vec<GridPos> {
 }
 
 fn standard_checkpoints() -> Vec<GridPos> {
-    let center = GridPos::new(GRID_COLUMNS / 2, GRID_ROWS / 2);
+    let center = scaled_grid_pos(BASE_GRID_COLUMNS / 2, BASE_GRID_ROWS / 2);
 
     vec![
         center,
-        GridPos::new(6, 3),
-        GridPos::new(22, 13),
-        GridPos::new(6, 13),
-        GridPos::new(22, 3),
+        scaled_grid_pos(6, 3),
+        scaled_grid_pos(22, 13),
+        scaled_grid_pos(6, 13),
+        scaled_grid_pos(22, 3),
     ]
 }

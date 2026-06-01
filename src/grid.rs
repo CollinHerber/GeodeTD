@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
-use crate::constants::{CELL_SIZE, GRID_COLUMNS, GRID_ROWS, OFFER_COUNT};
+use crate::constants::{
+    BASE_GRID_COLUMNS, BASE_GRID_ROWS, CELL_SIZE, GRID_COLUMNS, GRID_ROWS, OFFER_COUNT,
+    PLAY_AREA_SCALE,
+};
 
 const BOARD_Y_OFFSET: f32 = -8.0;
 
@@ -39,11 +42,15 @@ impl GridPos {
 }
 
 pub fn start_pos() -> GridPos {
-    GridPos::new(1, GRID_ROWS / 2)
+    scaled_grid_pos(1, BASE_GRID_ROWS / 2)
 }
 
 pub fn finish_pos() -> GridPos {
-    GridPos::new(GRID_COLUMNS - 2, GRID_ROWS / 2)
+    scaled_grid_pos(BASE_GRID_COLUMNS - 2, BASE_GRID_ROWS / 2)
+}
+
+pub fn scaled_grid_pos(col: i32, row: i32) -> GridPos {
+    GridPos::new(col * PLAY_AREA_SCALE, row * PLAY_AREA_SCALE)
 }
 
 pub fn board_width() -> f32 {

@@ -1,3 +1,4 @@
+use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use std::time::Duration;
@@ -12,6 +13,69 @@ use crate::ui::{
     clear_selection_menu, is_upgrade_button_click, offer_index_at, refresh_path_markers,
     spawn_gem_info, spawn_selection_menu, tower_sprite_size,
 };
+
+const MIN_CAMERA_SCALE: f32 = 0.45;
+const MAX_CAMERA_SCALE: f32 = 2.8;
+const ZOOM_STEP: f32 = 0.88;
+const PIXELS_PER_SCROLL_LINE: f32 = 16.0;
+const PAN_DRAG_THRESHOLD: f32 = 4.0;
+
+#[derive(Resource, Default)]
+pub struct CameraDrag {
+    active: bool,
+    distance: f32,
+    suppress_click: bool,
+}
+
+pub fn pan_and_zoom_camera(
+    game: Res<Game>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    scroll: Res<AccumulatedMouseScroll>,
+    motion: Res<AccumulatedMouseMotion>,
+    mut drag: ResMut<CameraDrag>,
+    mut camera: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
+) {
+    if game.screen != AppScreen::Playing {
+        *drag = CameraDrag::default();
+        return;
+    }
+
+    let Ok((mut transform, mut projection)) = camera.single_mut() else {
+        return;
+    };
+    let Projection::Orthographic(projection) = &mut *projection else {
+        return;
+    };
+
+    if scroll.delta.y != 0.0 {
+        let scroll_lines = match scroll.unit {
+            MouseScrollUnit::Line => scroll.delta.y,
+            MouseScrollUnit::Pixel => scroll.delta.y / PIXELS_PER_SCROLL_LINE,
+        };
+        projection.scale = (projection.scale * ZOOM_STEP.powf(scroll_lines))
+            .clamp(MIN_CAMERA_SCALE, MAX_CAMERA_SCALE);
+    }
+
+    if buttons.just_pressed(MouseButton::Left) {
+        drag.active = true;
+        drag.distance = 0.0;
+        drag.suppress_click = false;
+    }
+
+    if drag.active && buttons.pressed(MouseButton::Left) && motion.delta != Vec2::ZERO {
+        drag.distance += motion.delta.length();
+        if drag.distance >= PAN_DRAG_THRESHOLD {
+            transform.translation.x -= motion.delta.x * projection.scale;
+            transform.translation.y += motion.delta.y * projection.scale;
+        }
+    }
+
+    if buttons.just_released(MouseButton::Left) {
+        drag.suppress_click = drag.distance >= PAN_DRAG_THRESHOLD;
+        drag.active = false;
+        drag.distance = 0.0;
+    }
+}
 
 pub fn select_offer(
     mut commands: Commands,
@@ -51,6 +115,7 @@ pub fn place_or_select(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform)>,
+    mut camera_drag: ResMut<CameraDrag>,
     mut game: ResMut<Game>,
     mut board: ResMut<Board>,
     path_markers: Query<Entity, With<PathMarker>>,
@@ -59,10 +124,12 @@ pub fn place_or_select(
     tower_positions: Query<(Entity, &Transform), With<Tower>>,
     gem_images: Res<GemImages>,
 ) {
-    if game.screen != AppScreen::Playing
-        || game.phase != Phase::Build
-        || !buttons.just_pressed(MouseButton::Left)
-    {
+    if game.screen != AppScreen::Playing || !buttons.just_released(MouseButton::Left) {
+        return;
+    }
+
+    if camera_drag.suppress_click {
+        camera_drag.suppress_click = false;
         return;
     }
 
@@ -70,7 +137,9 @@ pub fn place_or_select(
         return;
     };
 
-    if let Some(offer_index) = offer_index_at(world_pos) {
+    if game.phase == Phase::Build
+        && let Some(offer_index) = offer_index_at(world_pos)
+    {
         if let Some(gem) = game.offers[offer_index] {
             game.selected_offer = offer_index;
             game.selected_tower = None;
@@ -82,12 +151,16 @@ pub fn place_or_select(
     }
 
     if game.selected_tower.is_some() && is_upgrade_button_click(world_pos) {
-        begin_upgrade_selection(&mut commands, &mut game, &towers, &menu_items);
+        if game.phase == Phase::Build {
+            begin_upgrade_selection(&mut commands, &mut game, &towers, &menu_items);
+        } else {
+            game.message = "Upgrades are available during build rounds.".to_string();
+        }
         return;
     }
 
     if let Some(tower_entity) = tower_at_world_position(world_pos, &tower_positions) {
-        if game.upgrade_source.is_some() {
+        if game.phase == Phase::Build && game.upgrade_source.is_some() {
             complete_upgrade(
                 &mut commands,
                 &mut game,
@@ -101,6 +174,10 @@ pub fn place_or_select(
         } else {
             select_tower(&mut commands, &mut game, &menu_items, &towers, tower_entity);
         }
+        return;
+    }
+
+    if game.phase != Phase::Build {
         return;
     }
 
@@ -270,6 +347,10 @@ fn place_tower(
     refresh_path_markers(commands, path_markers, &board.path);
     clear_selection_menu(commands, menu_items);
     game.begin_countdown(gem);
+    game.selected_tower = Some(tower_entity);
+    game.upgrade_source = None;
+    let preview_tower = chipped_tower(gem);
+    spawn_selection_menu(commands, &preview_tower);
 }
 
 fn spawn_tower(
@@ -278,9 +359,7 @@ fn spawn_tower(
     gem: crate::gem::GemKind,
     gem_images: &GemImages,
 ) -> Entity {
-    let stats = gem.chipped_stats();
-    let mut cooldown = Timer::from_seconds(stats.cooldown, TimerMode::Once);
-    cooldown.set_elapsed(Duration::from_secs_f32(stats.cooldown));
+    let tower = chipped_tower(gem);
 
     commands
         .spawn((
@@ -290,16 +369,24 @@ fn spawn_tower(
                 ..default()
             },
             Transform::from_translation(grid_to_world(pos).extend(5.0)),
-            Tower {
-                gem,
-                grade: GemGrade::Chipped,
-                damage: stats.damage,
-                range: stats.range,
-                cooldown,
-            },
+            tower,
             GameWorld,
         ))
         .id()
+}
+
+fn chipped_tower(gem: crate::gem::GemKind) -> Tower {
+    let stats = gem.chipped_stats();
+    let mut cooldown = Timer::from_seconds(stats.cooldown, TimerMode::Once);
+    cooldown.set_elapsed(Duration::from_secs_f32(stats.cooldown));
+
+    Tower {
+        gem,
+        grade: GemGrade::Chipped,
+        damage: stats.damage,
+        range: stats.range,
+        cooldown,
+    }
 }
 
 fn cursor_world_position(

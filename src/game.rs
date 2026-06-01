@@ -88,7 +88,6 @@ impl Game {
         self.phase = Phase::Build;
         self.round += 1;
         self.refresh_offers();
-        self.selected_tower = None;
         self.upgrade_source = None;
         self.message = format!("Round {}: pick one of five chipped gems.", self.round);
     }

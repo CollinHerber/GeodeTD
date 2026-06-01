@@ -19,7 +19,7 @@ use combat::{
 };
 use game::Game;
 use gem_visual::GemImages;
-use input::{place_or_select, select_offer};
+use input::{CameraDrag, pan_and_zoom_camera, place_or_select, select_offer};
 use ui::{
     handle_menu_clicks, setup, toggle_escape_menu, update_hud, update_offer_visuals, update_top_bar,
 };
@@ -30,6 +30,7 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.045, 0.05, 0.06)))
         .insert_resource(Board::new())
         .insert_resource(Game::new())
+        .init_resource::<CameraDrag>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Geode TD".into(),
@@ -43,6 +44,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                pan_and_zoom_camera,
                 select_offer,
                 place_or_select,
                 update_wave_countdown,
