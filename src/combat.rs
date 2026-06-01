@@ -1,19 +1,14 @@
 use bevy::prelude::*;
-use std::collections::HashSet;
 
 use crate::components::{Enemy, GameWorld, Poison, ShotEffect, Slowed, Tower};
 use crate::game::{AppScreen, Game, RoundKind};
 use crate::gem::GemEffect;
 
-/// How far chain lightning can arc between successive enemies.
-const CHAIN_JUMP_RADIUS: f32 = 96.0;
-const LIGHTNING_COLOR: Color = Color::srgb(0.62, 0.86, 1.0);
-
 pub fn tower_attack(
     mut commands: Commands,
     time: Res<Time>,
-    mut game: ResMut<Game>,
-    mut towers: Query<(&Transform, &mut Tower)>,
+    game: Res<Game>,
+    mut towers: Query<(Entity, &Transform, &mut Tower)>,
     mut enemies: Query<(Entity, &Transform, &mut Enemy)>,
     mut poisons: Query<&mut Poison>,
 ) {
@@ -23,31 +18,61 @@ pub fn tower_attack(
 
     let delta = time.delta().mul_f32(game.speed_multiplier());
 
-    // Snapshot live enemy positions once so targeting and area/chain effects can be
-    // computed without holding a mutable borrow of `enemies`.
-    let snapshot: Vec<(Entity, Vec2)> = enemies
+    // Opal support auras: (tower entity, position, range, cooldown reduction).
+    // Snapshotted up front so each tower can be hasted by the others.
+    let auras: Vec<(Entity, Vec2, f32, f32)> = towers
         .iter()
-        .filter(|(_, _, enemy)| enemy.health > 0.0)
-        .map(|(entity, transform, _)| (entity, transform.translation.truncate()))
+        .filter_map(|(entity, transform, tower)| {
+            if let GemEffect::Haste { cooldown_reduction } = tower.gem.effect(tower.grade) {
+                Some((
+                    entity,
+                    transform.translation.truncate(),
+                    tower.range,
+                    cooldown_reduction,
+                ))
+            } else {
+                None
+            }
+        })
         .collect();
 
-    for (tower_transform, mut tower) in &mut towers {
-        tower.cooldown.tick(delta);
+    // Snapshot live enemy positions (and whether they fly) once so targeting and
+    // area effects can be computed without holding a mutable borrow of `enemies`.
+    let snapshot: Vec<(Entity, Vec2, bool)> = enemies
+        .iter()
+        .filter(|(_, _, enemy)| enemy.health > 0.0)
+        .map(|(entity, transform, enemy)| (entity, transform.translation.truncate(), enemy.flying))
+        .collect();
+
+    for (tower_entity, tower_transform, mut tower) in &mut towers {
+        let tower_position = tower_transform.translation.truncate();
+
+        // Nearby Opals speed this tower up; their reductions stack, capped.
+        let haste = (1.0
+            + auras
+                .iter()
+                .filter(|(entity, position, range, _)| {
+                    *entity != tower_entity && position.distance(tower_position) <= *range
+                })
+                .map(|(_, _, _, reduction)| *reduction)
+                .sum::<f32>())
+        .min(2.5);
+
+        tower.cooldown.tick(delta.mul_f32(haste));
         if !tower.cooldown.is_finished() {
             continue;
         }
 
-        let tower_position = tower_transform.translation.truncate();
         let target = snapshot
             .iter()
-            .filter_map(|(entity, position)| {
+            .filter_map(|(entity, position, flying)| {
                 let distance = position.distance(tower_position);
-                (distance <= tower.range).then_some((*entity, *position, distance))
+                (distance <= tower.range).then_some((*entity, *position, *flying, distance))
             })
-            .min_by(|(_, _, left), (_, _, right)| left.total_cmp(right))
-            .map(|(entity, position, _)| (entity, position));
+            .min_by(|(_, _, _, left), (_, _, _, right)| left.total_cmp(right))
+            .map(|(entity, position, flying, _)| (entity, position, flying));
 
-        let Some((target, target_position)) = target else {
+        let Some((target, target_position, target_flying)) = target else {
             continue;
         };
 
@@ -56,15 +81,15 @@ pub fn tower_attack(
         let effect = tower.gem.effect(tower.grade);
         let mut damage = tower.damage * tower.grade.damage_multiplier();
 
-        let mut crit = false;
-        if let GemEffect::Crit { chance, multiplier } = effect
-            && game.rng.next_f32() < chance
+        // Favored gems (Amethyst vs air, Diamond vs ground) hit their preferred
+        // enemy class harder.
+        if let GemEffect::Favored { air, multiplier } = effect
+            && target_flying == air
         {
             damage *= multiplier;
-            crit = true;
         }
 
-        // Gather secondary damage and the beams to draw for area/chain effects.
+        // Gather secondary damage and the beams to draw for area effects.
         let mut secondary: Vec<(Entity, f32)> = Vec::new();
         let mut beams: Vec<(Vec2, Vec2, Color, f32)> = Vec::new();
 
@@ -73,50 +98,38 @@ pub fn tower_attack(
                 radius,
                 damage_fraction,
             } => {
-                for (entity, position) in &snapshot {
+                for (entity, position, _) in &snapshot {
                     if *entity != target && position.distance(target_position) <= radius {
                         secondary.push((*entity, damage * damage_fraction));
                     }
                 }
             }
-            GemEffect::Chain {
-                chance,
-                jumps,
+            GemEffect::Multi {
+                targets,
                 damage_fraction,
-            } if game.rng.next_f32() < chance => {
-                let mut from = target_position;
-                let mut hit: HashSet<Entity> = HashSet::from([target]);
-                for _ in 0..jumps {
-                    let next = snapshot
-                        .iter()
-                        .filter(|(entity, position)| {
-                            !hit.contains(entity) && position.distance(from) <= CHAIN_JUMP_RADIUS
-                        })
-                        .min_by(|(_, a), (_, b)| a.distance(from).total_cmp(&b.distance(from)));
-                    let Some((entity, position)) = next else {
-                        break;
-                    };
-                    secondary.push((*entity, damage * damage_fraction));
-                    beams.push((from, *position, LIGHTNING_COLOR, 5.0));
-                    from = *position;
-                    hit.insert(*entity);
+            } => {
+                // Strike the nearest other in-range enemies, beyond the primary.
+                let mut others: Vec<(Entity, Vec2, f32)> = snapshot
+                    .iter()
+                    .filter(|(entity, _, _)| *entity != target)
+                    .filter_map(|(entity, position, _)| {
+                        let distance = position.distance(tower_position);
+                        (distance <= tower.range).then_some((*entity, *position, distance))
+                    })
+                    .collect();
+                others.sort_by(|(_, _, a), (_, _, b)| a.total_cmp(b));
+                for (entity, position, _) in
+                    others.into_iter().take(targets.saturating_sub(1) as usize)
+                {
+                    secondary.push((entity, damage * damage_fraction));
+                    beams.push((tower_position, position, tower.gem.color(), 4.0));
                 }
             }
             _ => {}
         }
 
-        // Primary beam (drawn last so it sits on top), thicker/white on a crit.
-        let (primary_color, primary_thickness) = if crit {
-            (Color::srgb(1.0, 0.97, 0.85), 7.0)
-        } else {
-            (tower.gem.color(), 4.0)
-        };
-        beams.push((
-            tower_position,
-            target_position,
-            primary_color,
-            primary_thickness,
-        ));
+        // Primary beam, drawn last so it sits on top.
+        beams.push((tower_position, target_position, tower.gem.color(), 4.0));
 
         if let Ok((_, _, mut enemy)) = enemies.get_mut(target) {
             enemy.health -= damage;
@@ -138,6 +151,7 @@ pub fn tower_attack(
                 dps_per_stack,
                 duration,
                 max_stacks,
+                slow_factor,
             } => {
                 if let Ok(mut poison) = poisons.get_mut(target) {
                     poison.stacks = (poison.stacks + 1).min(max_stacks);
@@ -150,6 +164,11 @@ pub fn tower_attack(
                         duration: Timer::from_seconds(duration, TimerMode::Once),
                     });
                 }
+                // The "slowing" half of the slowing poison.
+                commands.entity(target).insert(Slowed {
+                    factor: slow_factor,
+                    timer: Timer::from_seconds(duration, TimerMode::Once),
+                });
             }
             _ => {}
         }

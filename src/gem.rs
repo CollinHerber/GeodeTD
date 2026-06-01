@@ -1,5 +1,17 @@
 use bevy::prelude::*;
 
+// Each gem's data and on-hit behavior lives in its own file under `gem/` so the
+// kinds stay separated by concern. `GemKind` below is the shared handle the rest
+// of the game uses; it just dispatches to the per-gem `def()`.
+mod amethyst;
+mod aquamarine;
+mod diamond;
+mod emerald;
+mod opal;
+mod ruby;
+mod sapphire;
+mod topaz;
+
 const TOWER_RANGE_MULTIPLIER: f32 = 1.5;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -10,94 +22,64 @@ pub enum GemKind {
     Emerald,
     Amethyst,
     Diamond,
+    Aquamarine,
+    Opal,
+}
+
+/// The full static definition of a gem, assembled in its own module under `gem/`.
+/// Private to this module — the outside world goes through `GemKind`'s methods.
+struct GemDef {
+    name: &'static str,
+    srgb: [f32; 3],
+    /// Base (Chipped) tower stats before any grade multiplier.
+    chipped: TowerStats,
+    /// The special on-hit behavior, scaled by the tower's grade.
+    effect: fn(GemGrade) -> GemEffect,
 }
 
 impl GemKind {
-    pub fn name(self) -> &'static str {
+    /// Single dispatch point: adding a gem means one arm here plus its file.
+    fn def(self) -> GemDef {
         match self {
-            GemKind::Ruby => "Ruby",
-            GemKind::Sapphire => "Sapphire",
-            GemKind::Topaz => "Topaz",
-            GemKind::Emerald => "Emerald",
-            GemKind::Amethyst => "Amethyst",
-            GemKind::Diamond => "Diamond",
+            GemKind::Ruby => ruby::def(),
+            GemKind::Sapphire => sapphire::def(),
+            GemKind::Topaz => topaz::def(),
+            GemKind::Emerald => emerald::def(),
+            GemKind::Amethyst => amethyst::def(),
+            GemKind::Diamond => diamond::def(),
+            GemKind::Aquamarine => aquamarine::def(),
+            GemKind::Opal => opal::def(),
         }
     }
 
+    pub fn name(self) -> &'static str {
+        self.def().name
+    }
+
     pub fn color(self) -> Color {
-        let [r, g, b] = self.srgb();
+        let [r, g, b] = self.def().srgb;
         Color::srgb(r, g, b)
     }
 
     pub fn srgb(self) -> [f32; 3] {
-        match self {
-            GemKind::Ruby => [0.92, 0.08, 0.12],
-            GemKind::Sapphire => [0.12, 0.33, 0.95],
-            GemKind::Topaz => [1.0, 0.74, 0.12],
-            GemKind::Emerald => [0.08, 0.72, 0.34],
-            GemKind::Amethyst => [0.68, 0.22, 0.92],
-            GemKind::Diamond => [0.86, 0.96, 1.0],
-        }
+        self.def().srgb
     }
 
     pub fn chipped_stats(self) -> TowerStats {
-        match self {
-            // Large damage, slow attack, medium range — plus a small splash.
-            GemKind::Ruby => TowerStats::new(26.0, 134.0, 1.15),
-            // Low damage, high range, average attack speed — plus a slow.
-            GemKind::Sapphire => TowerStats::new(7.0, 172.0, 0.8),
-            // Fast, low-damage poke (unchanged baseline).
-            GemKind::Topaz => TowerStats::new(7.0, 118.0, 0.36),
-            // Low hit damage, slow attack, medium range — plus stacking poison.
-            GemKind::Emerald => TowerStats::new(6.0, 138.0, 1.0),
-            // High range, low damage, medium attack speed.
-            GemKind::Amethyst => TowerStats::new(8.0, 190.0, 0.8),
-            // Average damage and attack speed, small range — plus crits.
-            GemKind::Diamond => TowerStats::new(13.0, 112.0, 0.8),
-        }
+        self.def().chipped
     }
 
     /// The special on-hit behavior for this gem, scaled by the tower's grade.
     pub fn effect(self, grade: GemGrade) -> GemEffect {
-        let tier = grade.tier() as f32;
-        match self {
-            GemKind::Diamond => GemEffect::Crit {
-                chance: 0.05 + 0.03 * tier,
-                multiplier: 2.0,
-            },
-            GemKind::Sapphire => GemEffect::Slow {
-                factor: (0.6 - 0.05 * tier).max(0.3),
-                duration: 1.5,
-            },
-            GemKind::Ruby => GemEffect::Splash {
-                radius: 46.0,
-                damage_fraction: 0.5,
-            },
-            GemKind::Emerald => GemEffect::Poison {
-                dps_per_stack: 4.0 + tier,
-                duration: 3.0,
-                max_stacks: 5,
-            },
-            GemKind::Topaz => GemEffect::Chain {
-                chance: 0.05 + 0.02 * tier,
-                jumps: 3 + grade.tier() as u32,
-                damage_fraction: 0.6,
-            },
-            GemKind::Amethyst => GemEffect::None,
-        }
+        (self.def().effect)(grade)
     }
 }
 
-/// On-hit behavior layered on top of a tower's base damage. Magnitudes already
-/// account for grade where relevant (see `GemKind::effect`).
+/// Special behavior layered on top of a tower's base damage. Magnitudes already
+/// account for grade where relevant (see each gem module's `effect`).
 #[derive(Clone, Copy)]
 pub enum GemEffect {
     None,
-    /// Chance in `[0, 1]` to multiply a hit's damage by `multiplier`.
-    Crit {
-        chance: f32,
-        multiplier: f32,
-    },
     /// Multiplies enemy speed by `factor` (< 1.0) for `duration` seconds.
     Slow {
         factor: f32,
@@ -109,18 +91,29 @@ pub enum GemEffect {
         damage_fraction: f32,
     },
     /// Stacking damage-over-time; each hit adds a stack up to `max_stacks` and
-    /// refreshes the `duration`.
+    /// refreshes the `duration`. Also slows by `slow_factor` (a slowing poison).
     Poison {
         dps_per_stack: f32,
         duration: f32,
         max_stacks: u32,
+        slow_factor: f32,
     },
-    /// Chance to arc to up to `jumps` nearby enemies, each taking
+    /// Strikes up to `targets` separate enemies in range, the extras taking
     /// `damage_fraction` of the hit.
-    Chain {
-        chance: f32,
-        jumps: u32,
+    Multi {
+        targets: u32,
         damage_fraction: f32,
+    },
+    /// Deals `multiplier`x damage to its favored enemy class — air when `air` is
+    /// true, ground otherwise — and normal damage to the rest.
+    Favored {
+        air: bool,
+        multiplier: f32,
+    },
+    /// Support aura: reduces the cooldown of towers within range by
+    /// `cooldown_reduction` (a fraction in `[0, 1]`). Does nothing on hit.
+    Haste {
+        cooldown_reduction: f32,
     },
 }
 
@@ -129,9 +122,6 @@ impl GemEffect {
     pub fn describe(self) -> String {
         match self {
             GemEffect::None => "Effect: none".to_string(),
-            GemEffect::Crit { chance, multiplier } => {
-                format!("Crit: {:.0}% for x{:.0}", chance * 100.0, multiplier)
-            }
             GemEffect::Slow { factor, duration } => {
                 format!("Slow: -{:.0}% for {:.1}s", (1.0 - factor) * 100.0, duration)
             }
@@ -142,22 +132,36 @@ impl GemEffect {
             GemEffect::Poison {
                 dps_per_stack,
                 max_stacks,
+                slow_factor,
                 ..
-            } => format!("Poison: {:.0}/s up to {}x", dps_per_stack, max_stacks),
-            GemEffect::Chain { chance, jumps, .. } => {
-                format!("Chain: {:.0}% to {} targets", chance * 100.0, jumps)
+            } => format!(
+                "Poison: {:.0}/s up to {}x, -{:.0}% slow",
+                dps_per_stack,
+                max_stacks,
+                (1.0 - slow_factor) * 100.0
+            ),
+            GemEffect::Multi { targets, .. } => format!("Hits up to {} targets", targets),
+            GemEffect::Favored { air, multiplier } => format!(
+                "vs {}: x{:.1} damage",
+                if air { "air" } else { "ground" },
+                multiplier
+            ),
+            GemEffect::Haste { cooldown_reduction } => {
+                format!("Cooldowns -{:.0}% in range", cooldown_reduction * 100.0)
             }
         }
     }
 }
 
-pub const GEM_KINDS: [GemKind; 6] = [
+pub const GEM_KINDS: [GemKind; 8] = [
     GemKind::Ruby,
     GemKind::Sapphire,
     GemKind::Topaz,
     GemKind::Emerald,
     GemKind::Amethyst,
     GemKind::Diamond,
+    GemKind::Aquamarine,
+    GemKind::Opal,
 ];
 
 pub const GRADE_LADDER: [GemGrade; 5] = [

@@ -61,6 +61,8 @@ fn gem_index(gem: GemKind) -> usize {
         GemKind::Emerald => 3,
         GemKind::Amethyst => 4,
         GemKind::Diamond => 5,
+        GemKind::Aquamarine => 6,
+        GemKind::Opal => 7,
     }
 }
 
