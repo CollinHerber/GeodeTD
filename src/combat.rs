@@ -21,6 +21,8 @@ pub fn tower_attack(
         return;
     }
 
+    let delta = time.delta().mul_f32(game.speed_multiplier());
+
     // Snapshot live enemy positions once so targeting and area/chain effects can be
     // computed without holding a mutable borrow of `enemies`.
     let snapshot: Vec<(Entity, Vec2)> = enemies
@@ -30,7 +32,7 @@ pub fn tower_attack(
         .collect();
 
     for (tower_transform, mut tower) in &mut towers {
-        tower.cooldown.tick(time.delta());
+        tower.cooldown.tick(delta);
         if !tower.cooldown.is_finished() {
             continue;
         }
@@ -169,9 +171,10 @@ pub fn apply_poison(
         return;
     }
 
-    let delta = time.delta_secs();
+    let delta = time.delta_secs() * game.speed_multiplier();
+    let duration_delta = time.delta().mul_f32(game.speed_multiplier());
     for (entity, mut enemy, mut poison) in &mut enemies {
-        poison.duration.tick(time.delta());
+        poison.duration.tick(duration_delta);
         enemy.health -= poison.stacks as f32 * poison.dps_per_stack * delta;
         if poison.duration.is_finished() {
             commands.entity(entity).remove::<Poison>();
@@ -191,7 +194,8 @@ pub fn update_slow(
     }
 
     for (entity, mut slow) in &mut slows {
-        slow.timer.tick(time.delta());
+        slow.timer
+            .tick(time.delta().mul_f32(game.speed_multiplier()));
         if slow.timer.is_finished() {
             commands.entity(entity).remove::<Slowed>();
         }
@@ -249,7 +253,9 @@ pub fn cleanup_effects(
     }
 
     for (entity, mut effect) in &mut effects {
-        effect.timer.tick(time.delta());
+        effect
+            .timer
+            .tick(time.delta().mul_f32(game.speed_multiplier()));
         if effect.timer.is_finished() {
             commands.entity(entity).despawn();
         }

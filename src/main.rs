@@ -20,14 +20,22 @@ use combat::{
 use game::Game;
 use gem_visual::GemImages;
 use input::{
-    CameraDrag, handle_offer_clicks, handle_tower_action_clicks, pan_and_zoom_camera,
-    place_or_select, select_offer,
+    CameraDrag, handle_offer_clicks, handle_speed_clicks, handle_tower_action_clicks,
+    pan_and_zoom_camera, place_or_select, select_offer,
 };
 use ui::{
     handle_escape_menu_buttons, handle_menu_clicks, setup, toggle_escape_menu, update_hud,
     update_offer_visuals, update_top_bar,
 };
 use wave::{move_enemies, run_wave, update_wave_countdown};
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+enum GameSet {
+    Input,
+    Gameplay,
+    Ui,
+    Menu,
+}
 
 fn main() {
     App::new()
@@ -45,14 +53,32 @@ fn main() {
         }))
         .init_resource::<GemImages>()
         .add_systems(Startup, setup)
+        .configure_sets(
+            Update,
+            (
+                GameSet::Input,
+                GameSet::Gameplay,
+                GameSet::Ui,
+                GameSet::Menu,
+            )
+                .chain(),
+        )
         .add_systems(
             Update,
             (
                 pan_and_zoom_camera,
                 select_offer,
                 handle_offer_clicks,
+                handle_speed_clicks,
                 handle_tower_action_clicks,
                 place_or_select,
+            )
+                .chain()
+                .in_set(GameSet::Input),
+        )
+        .add_systems(
+            Update,
+            (
                 update_wave_countdown,
                 run_wave,
                 apply_poison,
@@ -62,14 +88,25 @@ fn main() {
                 move_enemies,
                 update_enemy_visuals,
                 cleanup_effects,
-                update_offer_visuals,
-                update_hud,
-                update_top_bar,
+            )
+                .chain()
+                .in_set(GameSet::Gameplay),
+        )
+        .add_systems(
+            Update,
+            (update_offer_visuals, update_hud, update_top_bar)
+                .chain()
+                .in_set(GameSet::Ui),
+        )
+        .add_systems(
+            Update,
+            (
                 handle_escape_menu_buttons,
                 handle_menu_clicks,
                 toggle_escape_menu,
             )
-                .chain(),
+                .chain()
+                .in_set(GameSet::Menu),
         )
         .run();
 }

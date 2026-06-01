@@ -6,8 +6,8 @@ use crate::board::Board;
 use crate::components::{
     CheckpointMarker, EscapeMenu, EscapeMenuAction, EscapeMenuButton, EscapeMenuInfo, GameWorld,
     HomeScreen, HowToPlayScreen, HudText, MenuAction, MenuButton, ModeSelectScreen, OfferButton,
-    OfferLabel, OfferVisual, PathMarker, SelectionMenu, SettingsScreen, TopBarText, Tower,
-    UpgradeButton,
+    OfferLabel, OfferVisual, PathMarker, SelectionMenu, SettingsScreen, SpeedButton, SpeedText,
+    TopBarText, Tower, UpgradeButton,
 };
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
 use crate::game::{AppScreen, Game, GameMode, Phase};
@@ -193,6 +193,31 @@ fn spawn_play_ui(commands: &mut Commands) {
                 TextColor(Color::srgb(0.93, 0.95, 0.96)),
                 TopBarText,
             ));
+            bar.spawn((
+                Button,
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: px(16),
+                    width: px(82),
+                    height: px(34),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.18, 0.23, 0.24)),
+                SpeedButton,
+            ))
+            .with_children(|button| {
+                button.spawn((
+                    Text::new("1x"),
+                    TextFont {
+                        font_size: 18.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.95, 0.97, 0.92)),
+                    SpeedText,
+                ));
+            });
         });
 }
 
@@ -359,7 +384,11 @@ fn stats_text(damage: f32, range: f32, cooldown: f32, effect: GemEffect) -> Stri
     )
 }
 
-pub fn update_top_bar(game: Res<Game>, mut bar: Query<&mut Text, With<TopBarText>>) {
+pub fn update_top_bar(
+    game: Res<Game>,
+    mut bar: Query<&mut Text, With<TopBarText>>,
+    mut speed: Query<&mut Text, (With<SpeedText>, Without<TopBarText>)>,
+) {
     if game.screen != AppScreen::Playing {
         return;
     }
@@ -374,6 +403,10 @@ pub fn update_top_bar(game: Res<Game>, mut bar: Query<&mut Text, With<TopBarText
         game.lives.max(0),
         game.coins
     );
+
+    if let Ok(mut speed) = speed.single_mut() {
+        **speed = format!("{}x", game.speed);
+    }
 }
 
 pub fn update_offer_visuals(

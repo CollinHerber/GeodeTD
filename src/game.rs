@@ -23,6 +23,7 @@ pub struct Game {
     pub selected_tower: Option<Entity>,
     pub upgrade_source: Option<Entity>,
     pub paused: bool,
+    pub speed: u8,
 }
 
 impl Game {
@@ -50,11 +51,24 @@ impl Game {
             selected_tower: None,
             upgrade_source: None,
             paused: false,
+            speed: 1,
         }
     }
 
     pub fn selected_gem(&self) -> Option<GemKind> {
         self.selected_offer.and_then(|index| self.offers[index])
+    }
+
+    pub fn speed_multiplier(&self) -> f32 {
+        self.speed as f32
+    }
+
+    pub fn cycle_speed(&mut self) {
+        self.speed = match self.speed {
+            1 => 2,
+            2 => 3,
+            _ => 1,
+        };
     }
 
     pub fn refresh_offers(&mut self) {
@@ -106,6 +120,7 @@ impl Game {
         self.selected_tower = None;
         self.upgrade_source = None;
         self.paused = false;
+        self.speed = 1;
         self.message = format!("{} mode: pick one of five chipped gems.", mode.name());
     }
 }

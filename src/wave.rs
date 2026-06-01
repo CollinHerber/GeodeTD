@@ -10,7 +10,8 @@ pub fn update_wave_countdown(time: Res<Time>, mut game: ResMut<Game>) {
         return;
     }
 
-    game.countdown_timer.tick(time.delta());
+    let delta = time.delta().mul_f32(game.speed_multiplier());
+    game.countdown_timer.tick(delta);
     game.message = format!(
         "Wave starts in {:.1} seconds.",
         game.countdown_timer.remaining_secs().max(0.0)
@@ -32,7 +33,8 @@ pub fn run_wave(
         return;
     }
 
-    game.spawn_timer.tick(time.delta());
+    let delta = time.delta().mul_f32(game.speed_multiplier());
+    game.spawn_timer.tick(delta);
     if game.pending_enemies > 0 && game.spawn_timer.just_finished() {
         spawn_enemy(&mut commands, &board.path, game.round);
         game.pending_enemies -= 1;
@@ -54,7 +56,7 @@ pub fn move_enemies(
         return;
     }
 
-    let delta = time.delta_secs();
+    let delta = time.delta_secs() * game.speed_multiplier();
 
     for (entity, mut transform, mut enemy, slowed) in &mut enemies {
         if enemy.next_path_index >= board.path.len() {

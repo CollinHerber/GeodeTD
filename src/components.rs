@@ -52,6 +52,12 @@ pub struct HudText;
 pub struct TopBarText;
 
 #[derive(Component)]
+pub struct SpeedButton;
+
+#[derive(Component)]
+pub struct SpeedText;
+
+#[derive(Component)]
 pub struct EscapeMenu;
 
 #[derive(Component)]

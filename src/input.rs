@@ -4,7 +4,7 @@ use bevy::window::PrimaryWindow;
 use std::time::Duration;
 
 use crate::board::{Board, find_complete_path};
-use crate::components::{GameWorld, OfferButton, PathMarker, SelectionMenu, Tower};
+use crate::components::{GameWorld, OfferButton, PathMarker, SelectionMenu, SpeedButton, Tower};
 use crate::game::{AppScreen, Game, Phase};
 use crate::gem::GemGrade;
 use crate::gem_visual::GemImages;
@@ -132,6 +132,23 @@ pub fn handle_offer_clicks(
             game.upgrade_source = None;
             clear_selection_menu(&mut commands, &menu_items);
             spawn_gem_info(&mut commands, gem);
+        }
+    }
+}
+
+pub fn handle_speed_clicks(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<SpeedButton>)>,
+    mut camera_drag: ResMut<CameraDrag>,
+    mut game: ResMut<Game>,
+) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    for interaction in &interactions {
+        if *interaction == Interaction::Pressed {
+            camera_drag.suppress_click = true;
+            game.cycle_speed();
         }
     }
 }
