@@ -144,16 +144,16 @@ jobs:
       # Push the HTML5 directory (not the zip) so itch serves it as a playable
       # web build. Butler reads BUTLER_API_KEY from the environment automatically.
       - name: Deploy to itch.io (Butler)
-        # `vars` is reliable in a step `if`; the secret is checked inside the
-        # script (step-level `env` is not dependable in its own `if`).
-        if: steps.version.outputs.release == 'true' && vars.ITCH_USER != '' && vars.ITCH_GAME != ''
+        # Secrets can't be referenced in a step `if:`, so the deploy config is
+        # carried in via `env` and the presence check happens in the script body.
+        if: steps.version.outputs.release == 'true'
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-          ITCH_USER: ${{ vars.ITCH_USER }}
-          ITCH_GAME: ${{ vars.ITCH_GAME }}
+          ITCH_USER: ${{ secrets.ITCH_USER }}
+          ITCH_GAME: ${{ secrets.ITCH_GAME }}
         run: |
-          if [ -z "$BUTLER_API_KEY" ]; then
-            echo "BUTLER_API_KEY secret not set; skipping itch.io deploy."
+          if [ -z "$BUTLER_API_KEY" ] || [ -z "$ITCH_USER" ] || [ -z "$ITCH_GAME" ]; then
+            echo "itch.io secrets (BUTLER_API_KEY/ITCH_USER/ITCH_GAME) not all set; skipping deploy."
             exit 0
           fi
           curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
