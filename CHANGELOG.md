@@ -1,6 +1,11 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+## [0.2.3] - 2026-06-01
+
+### Bug Fixes
+- Add dedicated windows release channel (8d4c846)
+
 ## [0.2.2] - 2026-06-01
 
 ### Bug Fixes
