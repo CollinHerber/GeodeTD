@@ -1,8 +1,7 @@
 use bevy::prelude::*;
 
 use crate::constants::{
-    BASE_GRID_COLUMNS, BASE_GRID_ROWS, CELL_SIZE, GRID_COLUMNS, GRID_ROWS, OFFER_COUNT,
-    PLAY_AREA_SCALE,
+    BASE_GRID_COLUMNS, BASE_GRID_ROWS, CELL_SIZE, GRID_COLUMNS, GRID_ROWS, PLAY_AREA_SCALE,
 };
 
 const BOARD_Y_OFFSET: f32 = -8.0;
@@ -73,8 +72,4 @@ pub fn world_to_grid(world: Vec2) -> Option<GridPos> {
     let row = ((world.y - BOARD_Y_OFFSET + board_height() * 0.5) / CELL_SIZE).floor() as i32;
     let pos = GridPos::new(col, row);
     pos.in_bounds().then_some(pos)
-}
-
-pub fn offer_x(index: usize) -> f32 {
-    -((OFFER_COUNT - 1) as f32 * 108.0) * 0.5 + index as f32 * 108.0
 }

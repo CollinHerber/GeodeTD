@@ -4,14 +4,14 @@ use bevy::window::PrimaryWindow;
 use std::time::Duration;
 
 use crate::board::{Board, find_complete_path};
-use crate::components::{GameWorld, PathMarker, SelectionMenu, Tower};
+use crate::components::{GameWorld, OfferButton, PathMarker, SelectionMenu, Tower};
 use crate::game::{AppScreen, Game, Phase};
 use crate::gem::GemGrade;
 use crate::gem_visual::GemImages;
 use crate::grid::{grid_to_world, world_to_grid};
 use crate::ui::{
-    clear_selection_menu, offer_index_at, refresh_path_markers, spawn_gem_info,
-    spawn_selection_menu, tower_sprite_size,
+    clear_selection_menu, refresh_path_markers, spawn_gem_info, spawn_selection_menu,
+    tower_sprite_size,
 };
 
 const MIN_CAMERA_SCALE: f32 = 0.45;
@@ -35,7 +35,7 @@ pub fn pan_and_zoom_camera(
     mut drag: ResMut<CameraDrag>,
     mut camera: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
 ) {
-    if game.screen != AppScreen::Playing {
+    if game.screen != AppScreen::Playing || game.paused {
         *drag = CameraDrag::default();
         return;
     }
@@ -83,7 +83,7 @@ pub fn select_offer(
     mut game: ResMut<Game>,
     menu_items: Query<Entity, With<SelectionMenu>>,
 ) {
-    if game.screen != AppScreen::Playing || game.phase != Phase::Build {
+    if game.screen != AppScreen::Playing || game.paused || game.phase != Phase::Build {
         return;
     }
 
@@ -101,11 +101,38 @@ pub fn select_offer(
     if let Some(index) = requested
         && let Some(gem) = game.offers[index]
     {
-        game.selected_offer = index;
+        game.selected_offer = Some(index);
         game.selected_tower = None;
         game.upgrade_source = None;
         clear_selection_menu(&mut commands, &menu_items);
         spawn_gem_info(&mut commands, gem);
+    }
+}
+
+pub fn handle_offer_clicks(
+    mut commands: Commands,
+    interactions: Query<(&Interaction, &OfferButton), Changed<Interaction>>,
+    mut camera_drag: ResMut<CameraDrag>,
+    mut game: ResMut<Game>,
+    menu_items: Query<Entity, With<SelectionMenu>>,
+) {
+    if game.screen != AppScreen::Playing || game.paused || game.phase != Phase::Build {
+        return;
+    }
+
+    for (interaction, offer) in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        camera_drag.suppress_click = true;
+        if let Some(gem) = game.offers[offer.index] {
+            game.selected_offer = Some(offer.index);
+            game.selected_tower = None;
+            game.upgrade_source = None;
+            clear_selection_menu(&mut commands, &menu_items);
+            spawn_gem_info(&mut commands, gem);
+        }
     }
 }
 
@@ -120,7 +147,7 @@ pub fn handle_tower_action_clicks(
     towers: Query<&Tower>,
     menu_items: Query<Entity, With<SelectionMenu>>,
 ) {
-    if game.screen != AppScreen::Playing {
+    if game.screen != AppScreen::Playing || game.paused {
         return;
     }
 
@@ -147,7 +174,8 @@ pub fn place_or_select(
     tower_positions: Query<(Entity, &Transform), With<Tower>>,
     gem_images: Res<GemImages>,
 ) {
-    if game.screen != AppScreen::Playing || !buttons.just_released(MouseButton::Left) {
+    if game.screen != AppScreen::Playing || game.paused || !buttons.just_released(MouseButton::Left)
+    {
         return;
     }
 
@@ -159,19 +187,6 @@ pub fn place_or_select(
     let Some(world_pos) = cursor_world_position(&windows, &camera) else {
         return;
     };
-
-    if game.phase == Phase::Build
-        && let Some(offer_index) = offer_index_at(world_pos)
-    {
-        if let Some(gem) = game.offers[offer_index] {
-            game.selected_offer = offer_index;
-            game.selected_tower = None;
-            game.upgrade_source = None;
-            clear_selection_menu(&mut commands, &menu_items);
-            spawn_gem_info(&mut commands, gem);
-        }
-        return;
-    }
 
     if let Some(tower_entity) = tower_at_world_position(world_pos, &tower_positions) {
         if game.phase == Phase::Build && game.upgrade_source.is_some() {
@@ -191,16 +206,29 @@ pub fn place_or_select(
         return;
     }
 
+    let had_tower_display = game.selected_tower.is_some() || game.upgrade_source.is_some();
+    if had_tower_display {
+        game.selected_tower = None;
+        game.upgrade_source = None;
+        clear_selection_menu(&mut commands, &menu_items);
+    }
+
     if game.phase != Phase::Build {
         return;
     }
 
     let Some(grid_pos) = world_to_grid(world_pos) else {
+        game.selected_offer = None;
+        clear_selection_menu(&mut commands, &menu_items);
         return;
     };
 
     if game.upgrade_source.is_some() {
         game.message = "Select a matching duplicate tower to sacrifice.".to_string();
+        return;
+    }
+
+    if had_tower_display {
         return;
     }
 
@@ -260,6 +288,7 @@ fn select_tower(
     };
 
     game.selected_tower = Some(tower_entity);
+    game.selected_offer = None;
     game.upgrade_source = None;
     game.message = format!("Selected {} {}.", tower.grade.name(), tower.gem.name());
     clear_selection_menu(commands, menu_items);
@@ -324,6 +353,7 @@ fn complete_upgrade(
     spawn_selection_menu(commands, &source_tower);
 
     game.selected_tower = Some(source_entity);
+    game.selected_offer = None;
     game.upgrade_source = None;
     game.message = format!(
         "Upgraded to {} {}.",
@@ -349,6 +379,7 @@ fn place_tower(
     }
 
     let Some(gem) = game.selected_gem() else {
+        game.message = "Select a chipped gem before placing a tower.".to_string();
         return;
     };
 
@@ -367,6 +398,7 @@ fn place_tower(
     clear_selection_menu(commands, menu_items);
     game.begin_countdown(gem);
     game.selected_tower = Some(tower_entity);
+    game.selected_offer = None;
     game.upgrade_source = None;
     let preview_tower = chipped_tower(gem);
     spawn_selection_menu(commands, &preview_tower);

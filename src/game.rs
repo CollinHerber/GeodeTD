@@ -14,7 +14,7 @@ pub struct Game {
     pub lives: i32,
     pub coins: u32,
     pub offers: [Option<GemKind>; OFFER_COUNT],
-    pub selected_offer: usize,
+    pub selected_offer: Option<usize>,
     pub pending_enemies: u32,
     pub spawn_timer: Timer,
     pub countdown_timer: Timer,
@@ -22,6 +22,7 @@ pub struct Game {
     pub message: String,
     pub selected_tower: Option<Entity>,
     pub upgrade_source: Option<Entity>,
+    pub paused: bool,
 }
 
 impl Game {
@@ -40,7 +41,7 @@ impl Game {
             lives: 20,
             coins: 0,
             offers: random_offers(&mut rng),
-            selected_offer: 0,
+            selected_offer: None,
             pending_enemies: 0,
             spawn_timer: ready_timer(0.65, TimerMode::Repeating),
             countdown_timer: Timer::from_seconds(WAVE_COUNTDOWN_SECONDS, TimerMode::Once),
@@ -48,20 +49,22 @@ impl Game {
             message: "Pick one of five chipped gems and place it.".to_string(),
             selected_tower: None,
             upgrade_source: None,
+            paused: false,
         }
     }
 
     pub fn selected_gem(&self) -> Option<GemKind> {
-        self.offers[self.selected_offer]
+        self.selected_offer.and_then(|index| self.offers[index])
     }
 
     pub fn refresh_offers(&mut self) {
         self.offers = random_offers(&mut self.rng);
-        self.selected_offer = 0;
+        self.selected_offer = None;
     }
 
     pub fn clear_offers(&mut self) {
         self.offers = [None; OFFER_COUNT];
+        self.selected_offer = None;
     }
 
     pub fn begin_countdown(&mut self, gem: GemKind) {
@@ -102,6 +105,7 @@ impl Game {
         self.refresh_offers();
         self.selected_tower = None;
         self.upgrade_source = None;
+        self.paused = false;
         self.message = format!("{} mode: pick one of five chipped gems.", mode.name());
     }
 }

@@ -4,20 +4,16 @@ use std::collections::HashMap;
 
 use crate::board::Board;
 use crate::components::{
-    CheckpointMarker, EscapeMenu, GameWorld, HomeScreen, HowToPlayScreen, HudText, MenuAction,
-    MenuButton, ModeSelectScreen, OfferLabel, OfferVisual, PathMarker, SelectionMenu,
-    SettingsScreen, TopBarText, Tower, UpgradeButton,
+    CheckpointMarker, EscapeMenu, EscapeMenuAction, EscapeMenuButton, EscapeMenuInfo, GameWorld,
+    HomeScreen, HowToPlayScreen, HudText, MenuAction, MenuButton, ModeSelectScreen, OfferButton,
+    OfferLabel, OfferVisual, PathMarker, SelectionMenu, SettingsScreen, TopBarText, Tower,
+    UpgradeButton,
 };
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
 use crate::game::{AppScreen, Game, GameMode, Phase};
 use crate::gem::{GRADE_LADDER, GemEffect, GemGrade, GemKind};
 use crate::gem_visual::GemImages;
-use crate::grid::{GridPos, finish_pos, grid_to_world, offer_x, start_pos};
-
-const OFFER_GEM_Y: f32 = -302.0;
-const OFFER_LABEL_Y: f32 = -348.0;
-const OFFER_HIT_WIDTH: f32 = 98.0;
-const OFFER_HIT_HEIGHT: f32 = 96.0;
+use crate::grid::{GridPos, finish_pos, grid_to_world, start_pos};
 
 pub fn setup(mut commands: Commands) {
     commands.spawn(Camera2d);
@@ -59,6 +55,7 @@ pub fn handle_menu_clicks(
         MenuAction::Play => {
             despawn_all(&mut commands, &home_entities);
             spawn_mode_select_screen(&mut commands);
+            game.paused = false;
             game.screen = AppScreen::ModeSelect;
         }
         MenuAction::Standard => {
@@ -86,11 +83,13 @@ pub fn handle_menu_clicks(
         MenuAction::HowToPlay => {
             despawn_all(&mut commands, &home_entities);
             spawn_how_to_play_screen(&mut commands);
+            game.paused = false;
             game.screen = AppScreen::HowToPlay;
         }
         MenuAction::Settings => {
             despawn_all(&mut commands, &home_entities);
             spawn_settings_screen(&mut commands);
+            game.paused = false;
             game.screen = AppScreen::Settings;
         }
         MenuAction::Home => {
@@ -100,28 +99,72 @@ pub fn handle_menu_clicks(
             despawn_all(&mut commands, &settings_entities);
             despawn_all(&mut commands, &game_entities);
             spawn_home_screen(&mut commands);
+            game.paused = false;
             game.screen = AppScreen::Home;
         }
     }
 }
 
-pub fn offer_index_at(world_pos: Vec2) -> Option<usize> {
-    (0..OFFER_COUNT).find(|index| {
-        let center = Vec2::new(offer_x(*index), (OFFER_GEM_Y + OFFER_LABEL_Y) * 0.5);
-        point_in_rect(
-            world_pos,
-            center,
-            Vec2::new(OFFER_HIT_WIDTH, OFFER_HIT_HEIGHT),
-        )
-    })
+#[allow(clippy::too_many_arguments)]
+pub fn handle_escape_menu_buttons(
+    mut commands: Commands,
+    interactions: Query<(&Interaction, &EscapeMenuButton), Changed<Interaction>>,
+    mut game: ResMut<Game>,
+    mut board: ResMut<Board>,
+    game_entities: Query<Entity, With<GameWorld>>,
+    home_entities: Query<Entity, With<HomeScreen>>,
+    mode_entities: Query<Entity, With<ModeSelectScreen>>,
+    how_to_play_entities: Query<Entity, With<HowToPlayScreen>>,
+    settings_entities: Query<Entity, With<SettingsScreen>>,
+    escape_info: Query<Entity, With<EscapeMenuInfo>>,
+    mut camera: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
+) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    for (interaction, button) in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        match button.action {
+            EscapeMenuAction::Reset => {
+                despawn_all(&mut commands, &game_entities);
+                let mode = game.mode;
+                board.reset_for_mode(mode);
+                game.reset_for_mode(mode);
+                reset_camera(&mut camera);
+                spawn_game_scene(&mut commands, &board);
+            }
+            EscapeMenuAction::Home => {
+                despawn_all(&mut commands, &home_entities);
+                despawn_all(&mut commands, &mode_entities);
+                despawn_all(&mut commands, &how_to_play_entities);
+                despawn_all(&mut commands, &settings_entities);
+                despawn_all(&mut commands, &game_entities);
+                game.paused = false;
+                game.screen = AppScreen::Home;
+                reset_camera(&mut camera);
+                spawn_home_screen(&mut commands);
+            }
+            EscapeMenuAction::HowToPlay => {
+                if escape_info.iter().next().is_some() {
+                    despawn_all(&mut commands, &escape_info);
+                } else {
+                    spawn_escape_how_to_play(&mut commands);
+                }
+            }
+        }
+    }
 }
 
 fn spawn_game_scene(commands: &mut Commands, board: &Board) {
     spawn_board_tiles(commands, board);
     spawn_path_markers(commands, &board.path);
     spawn_checkpoint_markers(commands, &board.checkpoints);
-    spawn_offer_bar(commands);
     spawn_play_ui(commands);
+    spawn_offer_bar(commands);
 }
 
 fn spawn_play_ui(commands: &mut Commands) {
@@ -156,7 +199,7 @@ fn spawn_play_ui(commands: &mut Commands) {
 pub fn toggle_escape_menu(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
-    game: Res<Game>,
+    mut game: ResMut<Game>,
     menu_items: Query<Entity, With<EscapeMenu>>,
 ) {
     if game.screen != AppScreen::Playing || !keys.just_pressed(KeyCode::Escape) {
@@ -165,8 +208,10 @@ pub fn toggle_escape_menu(
 
     if menu_items.iter().next().is_some() {
         despawn_all(&mut commands, &menu_items);
+        game.paused = false;
     } else {
         spawn_escape_menu(&mut commands);
+        game.paused = true;
     }
 }
 
@@ -334,32 +379,38 @@ pub fn update_top_bar(game: Res<Game>, mut bar: Query<&mut Text, With<TopBarText
 pub fn update_offer_visuals(
     game: Res<Game>,
     gem_images: Res<GemImages>,
-    mut offer_sprites: Query<(&OfferVisual, &mut Sprite, &mut Transform)>,
-    mut offer_labels: Query<(&OfferLabel, &mut Text2d, &mut TextColor)>,
+    mut offer_buttons: Query<(&OfferButton, &mut BackgroundColor)>,
+    mut offer_sprites: Query<(&OfferVisual, &mut ImageNode, &mut Node)>,
+    mut offer_labels: Query<(&OfferLabel, &mut Text, &mut TextColor)>,
 ) {
     if game.screen != AppScreen::Playing {
         return;
     }
 
-    for (offer, mut sprite, mut transform) in &mut offer_sprites {
-        let selected = game.selected_offer == offer.index && game.phase == Phase::Build;
-        let size = if selected { 44.0 } else { 34.0 };
-        sprite.custom_size = Some(Vec2::splat(size));
-        transform.scale = if selected {
-            Vec3::splat(1.05)
+    for (offer, mut color) in &mut offer_buttons {
+        let selected = game.selected_offer == Some(offer.index) && game.phase == Phase::Build;
+        color.0 = if selected {
+            Color::srgb(0.20, 0.28, 0.28)
         } else {
-            Vec3::ONE
+            Color::srgba(0.08, 0.09, 0.10, 0.94)
         };
+    }
 
-        sprite.image = match game.offers[offer.index] {
+    for (offer, mut image, mut node) in &mut offer_sprites {
+        let selected = game.selected_offer == Some(offer.index) && game.phase == Phase::Build;
+        let size = if selected { 44.0 } else { 34.0 };
+        node.width = px(size);
+        node.height = px(size);
+
+        image.image = match game.offers[offer.index] {
             Some(gem) => gem_images.handle(gem, GemGrade::Chipped),
             None => gem_images.empty(),
         };
-        sprite.color = Color::WHITE;
+        image.color = Color::WHITE;
     }
 
     for (label, mut text, mut color) in &mut offer_labels {
-        text.0 = match game.offers[label.index] {
+        **text = match game.offers[label.index] {
             Some(gem) => format!("Chipped\n{}", gem.name()),
             None => "--".to_string(),
         };
@@ -490,66 +541,189 @@ fn spawn_checkpoint_markers(commands: &mut Commands, checkpoints: &[GridPos]) {
 }
 
 fn spawn_escape_menu(commands: &mut Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(0),
+                left: px(0),
+                width: percent(100),
+                height: percent(100),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+            EscapeMenu,
+            GameWorld,
+        ))
+        .with_children(|overlay| {
+            overlay
+                .spawn((
+                    Node {
+                        width: px(360),
+                        padding: UiRect::all(px(20)),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(12),
+                        align_items: AlignItems::Stretch,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.04, 0.045, 0.052, 0.97)),
+                ))
+                .with_children(|panel| {
+                    panel.spawn((
+                        Text::new("Paused"),
+                        TextFont {
+                            font_size: 32.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.94, 0.96, 0.91)),
+                    ));
+                    spawn_escape_button(panel, "Reset", EscapeMenuAction::Reset);
+                    spawn_escape_button(panel, "Main Menu", EscapeMenuAction::Home);
+                    spawn_escape_button(panel, "How to Play", EscapeMenuAction::HowToPlay);
+                    panel.spawn((
+                        Text::new("Press Esc to resume"),
+                        TextFont {
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.62, 0.68, 0.68)),
+                    ));
+                });
+        });
+}
+
+fn spawn_escape_button(parent: &mut ChildSpawnerCommands, label: &str, action: EscapeMenuAction) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                height: px(46),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.18, 0.23, 0.24)),
+            EscapeMenuButton { action },
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label.to_string()),
+                TextFont {
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.95, 0.97, 0.92)),
+            ));
+        });
+}
+
+fn spawn_escape_how_to_play(commands: &mut Commands) {
     commands.spawn((
-        Sprite::from_color(
-            Color::srgba(0.02, 0.025, 0.03, 0.90),
-            Vec2::new(760.0, 290.0),
-        ),
-        Transform::from_xyz(0.0, 34.0, 180.0),
-        EscapeMenu,
-        GameWorld,
-    ));
-    commands.spawn((
-        Text2d::new(""),
-        TextFont {
-            font_size: 18.0,
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(86),
+            right: px(24),
+            width: px(390),
+            padding: UiRect::all(px(18)),
+            flex_direction: FlexDirection::Column,
+            row_gap: px(10),
             ..default()
         },
-        TextColor(Color::srgb(0.92, 0.94, 0.94)),
-        Transform::from_xyz(0.0, 76.0, 190.0),
-        HudText,
+        BackgroundColor(Color::srgba(0.05, 0.06, 0.065, 0.97)),
         EscapeMenu,
+        EscapeMenuInfo,
         GameWorld,
-    ));
-    commands.spawn((
-        Text2d::new("Esc"),
-        TextFont {
-            font_size: 15.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.62, 0.68, 0.68)),
-        Transform::from_xyz(0.0, -88.0, 190.0),
-        EscapeMenu,
-        GameWorld,
+        children![
+            (
+                Text::new("How to Play"),
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.94, 0.96, 0.91)),
+            ),
+            (
+                Text::new(how_to_play_text()),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.76, 0.82, 0.80)),
+            )
+        ],
     ));
 }
 
-fn spawn_offer_bar(commands: &mut Commands) {
-    for index in 0..OFFER_COUNT {
-        let x = offer_x(index);
+fn reset_camera(camera: &mut Query<(&mut Transform, &mut Projection), With<Camera2d>>) {
+    let Ok((mut transform, mut projection)) = camera.single_mut() else {
+        return;
+    };
 
-        commands.spawn((
-            Sprite {
-                custom_size: Some(Vec2::splat(48.0)),
-                ..default()
-            },
-            Transform::from_xyz(x, OFFER_GEM_Y, 90.0),
-            OfferVisual { index },
-            GameWorld,
-        ));
+    transform.translation.x = 0.0;
+    transform.translation.y = 0.0;
 
-        commands.spawn((
-            Text2d::new(""),
-            TextFont {
-                font_size: 10.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.93, 0.94, 0.95)),
-            Transform::from_xyz(x, OFFER_LABEL_Y, 100.0),
-            OfferLabel { index },
-            GameWorld,
-        ));
+    if let Projection::Orthographic(projection) = &mut *projection {
+        projection.scale = 1.0;
     }
+}
+
+fn spawn_offer_bar(commands: &mut Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(52),
+                left: px(0),
+                width: percent(100),
+                height: px(96),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                column_gap: px(12),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.035, 0.04, 0.045, 0.90)),
+            GameWorld,
+        ))
+        .with_children(|bar| {
+            for index in 0..OFFER_COUNT {
+                bar.spawn((
+                    Button,
+                    Node {
+                        width: px(96),
+                        height: px(78),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        row_gap: px(4),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.08, 0.09, 0.10, 0.94)),
+                    OfferButton { index },
+                ))
+                .with_children(|offer| {
+                    offer.spawn((
+                        ImageNode::default(),
+                        Node {
+                            width: px(34),
+                            height: px(34),
+                            ..default()
+                        },
+                        OfferVisual { index },
+                    ));
+                    offer.spawn((
+                        Text::new(""),
+                        TextFont {
+                            font_size: 10.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.93, 0.94, 0.95)),
+                        OfferLabel { index },
+                    ));
+                });
+            }
+        });
 }
 
 fn spawn_home_screen(commands: &mut Commands) {
@@ -715,13 +889,7 @@ fn spawn_how_to_play_screen(commands: &mut Commands) {
         HowToPlayScreen,
     ));
     commands.spawn((
-        Text2d::new(
-            "Pick one chipped gem each round and place it on the board.\n\
-Enemies must travel through each numbered point before reaching the end.\n\
-Towers cannot block the route, but they can bend it.\n\
-Click a tower to upgrade it by sacrificing a matching duplicate.\n\
-Each enemy killed grants one coin.",
-        ),
+        Text2d::new(how_to_play_text()),
         TextFont {
             font_size: 19.0,
             ..default()
@@ -738,6 +906,15 @@ Each enemy killed grants one coin.",
         MenuAction::Home,
         HowToPlayScreen,
     );
+}
+
+fn how_to_play_text() -> &'static str {
+    "Pick one chipped gem each round and place it on the board.\n\
+Enemies must travel through each numbered point before reaching the end.\n\
+Towers cannot block the route, but they can bend it.\n\
+Click a tower to upgrade it by sacrificing a matching duplicate.\n\
+Each enemy killed grants one coin.\n\
+Use the mouse wheel to zoom, and hold left click to pan."
 }
 
 fn spawn_settings_screen(commands: &mut Commands) {

@@ -6,7 +6,7 @@ use crate::game::{AppScreen, Game, Phase};
 use crate::grid::grid_to_world;
 
 pub fn update_wave_countdown(time: Res<Time>, mut game: ResMut<Game>) {
-    if game.screen != AppScreen::Playing || game.phase != Phase::Countdown {
+    if game.screen != AppScreen::Playing || game.paused || game.phase != Phase::Countdown {
         return;
     }
 
@@ -28,7 +28,7 @@ pub fn run_wave(
     board: Res<Board>,
     enemies: Query<Entity, With<Enemy>>,
 ) {
-    if game.screen != AppScreen::Playing || game.phase != Phase::Wave {
+    if game.screen != AppScreen::Playing || game.paused || game.phase != Phase::Wave {
         return;
     }
 
@@ -50,7 +50,7 @@ pub fn move_enemies(
     board: Res<Board>,
     mut enemies: Query<(Entity, &mut Transform, &mut Enemy, Option<&Slowed>)>,
 ) {
-    if game.screen != AppScreen::Playing {
+    if game.screen != AppScreen::Playing || game.paused {
         return;
     }
 

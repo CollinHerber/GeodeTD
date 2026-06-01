@@ -17,7 +17,7 @@ pub fn tower_attack(
     mut enemies: Query<(Entity, &Transform, &mut Enemy)>,
     mut poisons: Query<&mut Poison>,
 ) {
-    if game.screen != AppScreen::Playing {
+    if game.screen != AppScreen::Playing || game.paused {
         return;
     }
 
@@ -165,7 +165,7 @@ pub fn apply_poison(
     game: Res<Game>,
     mut enemies: Query<(Entity, &mut Enemy, &mut Poison)>,
 ) {
-    if game.screen != AppScreen::Playing {
+    if game.screen != AppScreen::Playing || game.paused {
         return;
     }
 
@@ -186,7 +186,7 @@ pub fn update_slow(
     game: Res<Game>,
     mut slows: Query<(Entity, &mut Slowed)>,
 ) {
-    if game.screen != AppScreen::Playing {
+    if game.screen != AppScreen::Playing || game.paused {
         return;
     }
 
@@ -206,7 +206,7 @@ pub fn reap_enemies(
     mut game: ResMut<Game>,
     enemies: Query<(Entity, &Enemy)>,
 ) {
-    if game.screen != AppScreen::Playing {
+    if game.screen != AppScreen::Playing || game.paused {
         return;
     }
 
@@ -222,7 +222,7 @@ pub fn update_enemy_visuals(
     game: Res<Game>,
     mut enemies: Query<(&Enemy, &mut Sprite, Option<&Slowed>, Option<&Poison>)>,
 ) {
-    if game.screen != AppScreen::Playing {
+    if game.screen != AppScreen::Playing || game.paused {
         return;
     }
 
@@ -244,7 +244,7 @@ pub fn cleanup_effects(
     game: Res<Game>,
     mut effects: Query<(Entity, &mut ShotEffect)>,
 ) {
-    if game.screen != AppScreen::Playing {
+    if game.screen != AppScreen::Playing || game.paused {
         return;
     }
 

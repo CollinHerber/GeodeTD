@@ -55,12 +55,32 @@ pub struct TopBarText;
 pub struct EscapeMenu;
 
 #[derive(Component)]
+pub struct EscapeMenuInfo;
+
+#[derive(Component)]
+pub struct EscapeMenuButton {
+    pub action: EscapeMenuAction,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum EscapeMenuAction {
+    Reset,
+    Home,
+    HowToPlay,
+}
+
+#[derive(Component)]
 pub struct OfferVisual {
     pub index: usize,
 }
 
 #[derive(Component)]
 pub struct OfferLabel {
+    pub index: usize,
+}
+
+#[derive(Component)]
+pub struct OfferButton {
     pub index: usize,
 }
 

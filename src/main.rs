@@ -20,10 +20,12 @@ use combat::{
 use game::Game;
 use gem_visual::GemImages;
 use input::{
-    CameraDrag, handle_tower_action_clicks, pan_and_zoom_camera, place_or_select, select_offer,
+    CameraDrag, handle_offer_clicks, handle_tower_action_clicks, pan_and_zoom_camera,
+    place_or_select, select_offer,
 };
 use ui::{
-    handle_menu_clicks, setup, toggle_escape_menu, update_hud, update_offer_visuals, update_top_bar,
+    handle_escape_menu_buttons, handle_menu_clicks, setup, toggle_escape_menu, update_hud,
+    update_offer_visuals, update_top_bar,
 };
 use wave::{move_enemies, run_wave, update_wave_countdown};
 
@@ -48,6 +50,7 @@ fn main() {
             (
                 pan_and_zoom_camera,
                 select_offer,
+                handle_offer_clicks,
                 handle_tower_action_clicks,
                 place_or_select,
                 update_wave_countdown,
@@ -62,6 +65,7 @@ fn main() {
                 update_offer_visuals,
                 update_hud,
                 update_top_bar,
+                handle_escape_menu_buttons,
                 handle_menu_clicks,
                 toggle_escape_menu,
             )
