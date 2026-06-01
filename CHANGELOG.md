@@ -1,6 +1,16 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+## [0.2.2] - 2026-06-01
+
+### Bug Fixes
+- Update path to itch server (1ef5bd5)
+
+## [0.2.1] - 2026-06-01
+
+### Bug Fixes
+- Update to secrets for ci (de30dea)
+
 ## [0.2.0] - 2026-06-01
 
 ### Bug Fixes
