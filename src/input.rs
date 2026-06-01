@@ -56,6 +56,7 @@ pub fn place_or_select(
     path_markers: Query<Entity, With<PathMarker>>,
     menu_items: Query<Entity, With<SelectionMenu>>,
     mut towers: Query<(Entity, &mut Tower, &mut Sprite)>,
+    tower_positions: Query<(Entity, &Transform), With<Tower>>,
     gem_images: Res<GemImages>,
 ) {
     if game.screen != AppScreen::Playing
@@ -85,11 +86,7 @@ pub fn place_or_select(
         return;
     }
 
-    let Some(grid_pos) = world_to_grid(world_pos) else {
-        return;
-    };
-
-    if let Some(&tower_entity) = board.towers.get(&grid_pos) {
+    if let Some(tower_entity) = tower_at_world_position(world_pos, &tower_positions) {
         if game.upgrade_source.is_some() {
             complete_upgrade(
                 &mut commands,
@@ -106,6 +103,10 @@ pub fn place_or_select(
         }
         return;
     }
+
+    let Some(grid_pos) = world_to_grid(world_pos) else {
+        return;
+    };
 
     if game.upgrade_source.is_some() {
         game.message = "Select a matching duplicate tower to sacrifice.".to_string();
@@ -311,4 +312,19 @@ fn cursor_world_position(
     camera
         .viewport_to_world_2d(camera_transform, cursor_position)
         .ok()
+}
+
+fn tower_at_world_position(
+    world_pos: Vec2,
+    towers: &Query<(Entity, &Transform), With<Tower>>,
+) -> Option<Entity> {
+    towers
+        .iter()
+        .filter_map(|(entity, transform)| {
+            let tower_pos = transform.translation.truncate();
+            let distance = world_pos.distance(tower_pos);
+            (distance <= crate::constants::CELL_SIZE * 0.5).then_some((entity, distance))
+        })
+        .min_by(|(_, left), (_, right)| left.total_cmp(right))
+        .map(|(entity, _)| entity)
 }
