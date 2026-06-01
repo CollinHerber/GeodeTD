@@ -156,7 +156,10 @@ jobs:
             echo "itch.io secrets (BUTLER_API_KEY/ITCH_USER/ITCH_GAME) not all set; skipping deploy."
             exit 0
           fi
-          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          # itch.io retired broth.itch.ovh; broth.itch.zone is the current host.
+          # The broth URL is permanent and always resolves to the latest butler.
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
           unzip -o butler.zip
           chmod +x butler
           ./butler -V
