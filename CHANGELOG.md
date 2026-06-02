@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+## [0.4.0] - 2026-06-02
+
+### Features
+- Add in upgrade chances and finalizing basic multiplayer (2afdfce)
+- Add in upgrade chances and finalizing basic multiplayer (c5dae0a)
+- Adding in basic multiplayer aspects (ead8e14)
+- Add selected gem visuals (db68358)
+
 ## [0.3.0] - 2026-06-02
 
 ### Bug Fixes
