@@ -5,16 +5,16 @@ use std::time::Duration;
 
 use crate::board::{Board, find_complete_path};
 use crate::components::{
-    GameWorld, OfferButton, PathMarker, PlacementPreview, SelectionMenu, SpeedButton,
-    StarterCandidate, StarterWall, Tower,
+    ChanceBuyButton, ChancesButton, ChancesPanel, GameWorld, OfferButton, PathMarker,
+    PlacementPreview, SelectionMenu, SpeedButton, StarterCandidate, StarterWall, Tower,
 };
-use crate::game::{AppScreen, Game, Phase};
+use crate::game::{AppScreen, Game, Phase, tier_grade};
 use crate::gem::GemGrade;
 use crate::gem_visual::GemImages;
 use crate::grid::{grid_to_world, world_to_grid};
 use crate::ui::{
-    clear_selection_menu, refresh_path_markers, spawn_gem_info, spawn_keep_confirm,
-    spawn_selection_menu, tower_sprite_size,
+    clear_selection_menu, refresh_path_markers, spawn_chances_panel, spawn_gem_info,
+    spawn_keep_confirm, spawn_selection_menu, tower_sprite_size,
 };
 
 const MIN_CAMERA_SCALE: f32 = 0.45;
@@ -105,11 +105,12 @@ pub fn select_offer(
     if let Some(index) = requested
         && let Some(gem) = game.offers[index]
     {
+        let grade = game.offer_grades[index];
         game.selected_offer = Some(index);
         game.selected_tower = None;
         game.upgrade_source = None;
         clear_selection_menu(&mut commands, &menu_items);
-        spawn_gem_info(&mut commands, gem);
+        spawn_gem_info(&mut commands, gem, grade);
     }
 }
 
@@ -131,11 +132,12 @@ pub fn handle_offer_clicks(
 
         camera_drag.suppress_click = true;
         if let Some(gem) = game.offers[offer.index] {
+            let grade = game.offer_grades[offer.index];
             game.selected_offer = Some(offer.index);
             game.selected_tower = None;
             game.upgrade_source = None;
             clear_selection_menu(&mut commands, &menu_items);
-            spawn_gem_info(&mut commands, gem);
+            spawn_gem_info(&mut commands, gem, grade);
         }
     }
 }
@@ -218,6 +220,69 @@ pub fn handle_show_range_clicks(
     }
 }
 
+pub fn handle_chances_toggle(
+    mut commands: Commands,
+    interactions: Query<&Interaction, (Changed<Interaction>, With<ChancesButton>)>,
+    mut camera_drag: ResMut<CameraDrag>,
+    game: Res<Game>,
+    panels: Query<Entity, With<ChancesPanel>>,
+) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    for interaction in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        camera_drag.suppress_click = true;
+        if panels.iter().next().is_some() {
+            for entity in &panels {
+                commands.entity(entity).despawn();
+            }
+        } else {
+            spawn_chances_panel(&mut commands);
+        }
+    }
+}
+
+pub fn handle_chance_buy_clicks(
+    interactions: Query<(&Interaction, &ChanceBuyButton), Changed<Interaction>>,
+    mut camera_drag: ResMut<CameraDrag>,
+    mut game: ResMut<Game>,
+) {
+    if game.screen != AppScreen::Playing || game.paused {
+        return;
+    }
+
+    for (interaction, button) in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        camera_drag.suppress_click = true;
+
+        let tier = button.tier;
+        if game.chances.at_cap(tier) {
+            game.message = format!("{} odds are already maxed.", tier_grade(tier).name());
+            continue;
+        }
+        let cost = game.chances.next_cost();
+        if game.coins < cost {
+            game.message = format!("Need {} gold to raise upgrade chances.", cost);
+            continue;
+        }
+        if let Some(spent) = game.chances.buy(tier) {
+            game.coins -= spent;
+            let pct = game.chances.pct(tier);
+            game.message = format!(
+                "{} starter odds raised to {}%.",
+                tier_grade(tier).name(),
+                pct
+            );
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_keep_confirm_clicks(
     mut commands: Commands,
@@ -233,7 +298,7 @@ pub fn handle_keep_confirm_clicks(
     mut board: ResMut<Board>,
     path_markers: Query<Entity, With<PathMarker>>,
     menu_items: Query<Entity, With<SelectionMenu>>,
-    mut towers: Query<(Entity, &mut Tower, &mut Sprite)>,
+    mut towers: Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
 ) {
     if game.screen != AppScreen::Playing || game.paused {
         return;
@@ -279,6 +344,7 @@ pub fn update_placement_preview(
     let Some(gem) = game.selected_gem() else {
         return;
     };
+    let grade = game.selected_offer_grade().unwrap_or(GemGrade::Chipped);
 
     let Some(world_pos) = cursor_world_position(&windows, &camera) else {
         return;
@@ -307,8 +373,8 @@ pub fn update_placement_preview(
     ));
     commands.spawn((
         Sprite {
-            image: gem_images.handle(gem, GemGrade::Chipped),
-            custom_size: Some(tower_sprite_size(GemGrade::Chipped) * 0.9),
+            image: gem_images.handle(gem, grade),
+            custom_size: Some(tower_sprite_size(grade) * 0.9),
             color: Color::srgba(1.0, 1.0, 1.0, if valid { 0.58 } else { 0.32 }),
             ..default()
         },
@@ -330,8 +396,7 @@ pub fn place_or_select(
     mut board: ResMut<Board>,
     path_markers: Query<Entity, With<PathMarker>>,
     menu_items: Query<Entity, With<SelectionMenu>>,
-    mut towers: Query<(Entity, &mut Tower, &mut Sprite)>,
-    tower_positions: Query<(Entity, &Transform), With<Tower>>,
+    mut towers: Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
     starter_candidates: Query<&StarterCandidate>,
     gem_images: Res<GemImages>,
 ) {
@@ -351,7 +416,7 @@ pub fn place_or_select(
         return;
     };
 
-    if let Some(tower_entity) = tower_at_world_position(world_pos, &tower_positions) {
+    if let Some(tower_entity) = tower_at_world_position(world_pos, &towers) {
         let is_starter_candidate = starter_candidates.get(tower_entity).is_ok();
         // Upgrade mode takes precedence (in any phase, so upgrades work mid-wave) so
         // a click on a matching tower is consumed instead of inspected/kept.
@@ -492,10 +557,10 @@ fn select_tower(
     commands: &mut Commands,
     game: &mut Game,
     menu_items: &Query<Entity, With<SelectionMenu>>,
-    towers: &Query<(Entity, &mut Tower, &mut Sprite)>,
+    towers: &Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
     tower_entity: Entity,
 ) {
-    let Ok((_, tower, _)) = towers.get(tower_entity) else {
+    let Ok((_, _, tower, _)) = towers.get(tower_entity) else {
         return;
     };
 
@@ -514,13 +579,14 @@ fn select_keep_candidate(
     commands: &mut Commands,
     game: &mut Game,
     menu_items: &Query<Entity, With<SelectionMenu>>,
-    towers: &Query<(Entity, &mut Tower, &mut Sprite)>,
+    towers: &Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
     tower_entity: Entity,
 ) {
-    let Ok((_, tower, _)) = towers.get(tower_entity) else {
+    let Ok((_, _, tower, _)) = towers.get(tower_entity) else {
         return;
     };
     let gem = tower.gem;
+    let grade = tower.grade;
 
     game.keep_candidate = Some(tower_entity);
     game.selected_tower = None;
@@ -531,17 +597,17 @@ fn select_keep_candidate(
         gem.name()
     );
     clear_selection_menu(commands, menu_items);
-    spawn_keep_confirm(commands, gem);
+    spawn_keep_confirm(commands, gem, grade);
 }
 
 fn inspect_starter_candidate(
     commands: &mut Commands,
     game: &mut Game,
     menu_items: &Query<Entity, With<SelectionMenu>>,
-    towers: &Query<(Entity, &mut Tower, &mut Sprite)>,
+    towers: &Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
     tower_entity: Entity,
 ) {
-    let Ok((_, tower, _)) = towers.get(tower_entity) else {
+    let Ok((_, _, tower, _)) = towers.get(tower_entity) else {
         return;
     };
 
@@ -554,7 +620,7 @@ fn inspect_starter_candidate(
         crate::constants::OFFER_COUNT
     );
     clear_selection_menu(commands, menu_items);
-    spawn_gem_info(commands, tower.gem);
+    spawn_gem_info(commands, tower.gem, tower.grade);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -564,10 +630,10 @@ fn keep_starter(
     board: &mut Board,
     path_markers: &Query<Entity, With<PathMarker>>,
     menu_items: &Query<Entity, With<SelectionMenu>>,
-    towers: &mut Query<(Entity, &mut Tower, &mut Sprite)>,
+    towers: &mut Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
     kept_entity: Entity,
 ) {
-    let Ok((_, kept_tower, _)) = towers.get(kept_entity) else {
+    let Ok((_, _, kept_tower, _)) = towers.get(kept_entity) else {
         game.message = "That starter is no longer available.".to_string();
         return;
     };
@@ -605,7 +671,7 @@ fn complete_upgrade(
     game: &mut Game,
     board: &mut Board,
     menu_items: &Query<Entity, With<SelectionMenu>>,
-    towers: &mut Query<(Entity, &mut Tower, &mut Sprite)>,
+    towers: &mut Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
     starters: &Query<&StarterCandidate>,
     gem_images: &GemImages,
     sacrifice_entity: Entity,
@@ -626,8 +692,8 @@ fn complete_upgrade(
 
     let Ok(
         [
-            (_, mut source_tower, mut source_sprite),
-            (_, sacrifice_tower, _),
+            (_, _, mut source_tower, mut source_sprite),
+            (_, _, sacrifice_tower, _),
         ],
     ) = towers.get_many_mut([source_entity, sacrifice_entity])
     else {
@@ -705,6 +771,7 @@ fn place_tower(
         game.message = "Select a chipped gem before placing a tower.".to_string();
         return;
     };
+    let grade = game.offer_grades[offer_index];
 
     if game.placed_starters[offer_index].is_some() {
         game.message = "That chipped gem has already been placed.".to_string();
@@ -720,7 +787,14 @@ fn place_tower(
         return;
     };
 
-    let tower_entity = spawn_tower(commands, grid_pos, gem, gem_images, Some(offer_index));
+    let tower_entity = spawn_tower(
+        commands,
+        grid_pos,
+        gem,
+        grade,
+        gem_images,
+        Some(offer_index),
+    );
     board.towers.insert(grid_pos, tower_entity);
     board.path = new_path;
     refresh_path_markers(commands, path_markers, &board.path, game.show_path_overlay);
@@ -736,15 +810,14 @@ fn place_tower(
         game.message =
             "All five placed. Click one to select, then Confirm (Ctrl+click to keep instantly)."
                 .to_string();
-        let preview_tower = chipped_tower(gem);
-        spawn_gem_info(commands, preview_tower.gem);
+        spawn_gem_info(commands, gem, grade);
     } else {
         game.message = format!(
             "Placed starter {} of {}. Select and place the next chipped gem.",
             placed,
             crate::constants::OFFER_COUNT
         );
-        spawn_gem_info(commands, gem);
+        spawn_gem_info(commands, gem, grade);
     }
 }
 
@@ -752,14 +825,15 @@ fn spawn_tower(
     commands: &mut Commands,
     pos: crate::grid::GridPos,
     gem: crate::gem::GemKind,
+    grade: GemGrade,
     gem_images: &GemImages,
     starter_index: Option<usize>,
 ) -> Entity {
-    let tower = chipped_tower(gem);
+    let tower = tower_for_grade(gem, grade);
     let mut entity = commands.spawn((
         Sprite {
-            image: gem_images.handle(gem, GemGrade::Chipped),
-            custom_size: Some(tower_sprite_size(GemGrade::Chipped)),
+            image: gem_images.handle(gem, grade),
+            custom_size: Some(tower_sprite_size(grade)),
             ..default()
         },
         Transform::from_translation(grid_to_world(pos).extend(5.0)),
@@ -793,14 +867,14 @@ fn grid_pos_for_entity(board: &Board, entity: Entity) -> Option<crate::grid::Gri
         .find_map(|(pos, tower)| (*tower == entity).then_some(*pos))
 }
 
-fn chipped_tower(gem: crate::gem::GemKind) -> Tower {
+fn tower_for_grade(gem: crate::gem::GemKind, grade: GemGrade) -> Tower {
     let stats = gem.chipped_stats();
     let mut cooldown = Timer::from_seconds(stats.cooldown, TimerMode::Once);
     cooldown.set_elapsed(Duration::from_secs_f32(stats.cooldown));
 
     Tower {
         gem,
-        grade: GemGrade::Chipped,
+        grade,
         damage: stats.damage,
         range: stats.range,
         cooldown,
@@ -821,11 +895,11 @@ fn cursor_world_position(
 
 fn tower_at_world_position(
     world_pos: Vec2,
-    towers: &Query<(Entity, &Transform), With<Tower>>,
+    towers: &Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
 ) -> Option<Entity> {
     towers
         .iter()
-        .filter_map(|(entity, transform)| {
+        .filter_map(|(entity, transform, _, _)| {
             let tower_pos = transform.translation.truncate();
             let distance = world_pos.distance(tower_pos);
             (distance <= crate::constants::CELL_SIZE * 0.5).then_some((entity, distance))

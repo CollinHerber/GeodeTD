@@ -8,6 +8,7 @@ mod gem;
 mod gem_visual;
 mod grid;
 mod input;
+mod multiplayer;
 mod rng;
 mod ui;
 mod wave;
@@ -22,14 +23,17 @@ use enemy_art::EnemyArt;
 use game::Game;
 use gem_visual::GemImages;
 use input::{
-    CameraDrag, handle_keep_confirm_clicks, handle_offer_clicks, handle_show_range_clicks,
-    handle_speed_clicks, handle_tower_action_clicks, pan_and_zoom_camera, place_or_select,
-    select_offer, update_placement_preview,
+    CameraDrag, handle_chance_buy_clicks, handle_chances_toggle, handle_keep_confirm_clicks,
+    handle_offer_clicks, handle_show_range_clicks, handle_speed_clicks, handle_tower_action_clicks,
+    pan_and_zoom_camera, place_or_select, select_offer, update_placement_preview,
 };
 use ui::{
-    handle_escape_menu_buttons, handle_menu_clicks, setup, sync_aura_range_rings,
-    sync_upgrade_highlights, toggle_escape_menu, update_hud, update_offer_visuals,
-    update_round_info, update_show_range_button, update_top_bar, update_upgrade_button,
+    MultiplayerUiState, handle_escape_menu_buttons, handle_menu_clicks,
+    handle_multiplayer_text_input, setup, start_multiplayer_game_from_layout,
+    sync_aura_range_rings, sync_upgrade_highlights, toggle_escape_menu, update_chances_panel,
+    update_hud, update_join_lobby_screen, update_multiplayer_status_text,
+    update_multiplayer_text_inputs, update_offer_visuals, update_round_info,
+    update_show_range_button, update_top_bar, update_upgrade_button, update_waiting_lobby_screen,
 };
 use wave::{animate_enemies, move_enemies, run_wave, update_wave_countdown};
 
@@ -46,6 +50,8 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.045, 0.05, 0.06)))
         .insert_resource(Board::new())
         .insert_resource(Game::new())
+        .init_resource::<multiplayer::MultiplayerClient>()
+        .init_resource::<MultiplayerUiState>()
         .init_resource::<CameraDrag>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -77,8 +83,11 @@ fn main() {
                 handle_speed_clicks,
                 handle_tower_action_clicks,
                 handle_show_range_clicks,
+                handle_chances_toggle,
+                handle_chance_buy_clicks,
                 handle_keep_confirm_clicks,
                 place_or_select,
+                handle_multiplayer_text_input,
             )
                 .chain()
                 .in_set(GameSet::Input),
@@ -109,6 +118,13 @@ fn main() {
                 update_round_info,
                 update_upgrade_button,
                 update_show_range_button,
+                update_chances_panel,
+                multiplayer::poll_multiplayer_messages,
+                update_multiplayer_text_inputs,
+                update_multiplayer_status_text,
+                update_join_lobby_screen,
+                update_waiting_lobby_screen,
+                start_multiplayer_game_from_layout,
                 sync_upgrade_highlights,
                 sync_aura_range_rings,
                 update_placement_preview,

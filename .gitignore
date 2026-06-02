@@ -9,3 +9,5 @@ RELEASE_NOTES.md
 geode_td-web-*.zip
 .claude/
 .codex/
+
+.run/

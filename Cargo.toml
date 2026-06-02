@@ -3,5 +3,18 @@ name = "geode_td"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [
+    ".",
+    "crates/server",
+    "crates/shared",
+]
+resolver = "3"
+
 [dependencies]
 bevy = "0.18.1"
+geode_td_shared = { path = "crates/shared" }
+serde_json = "1.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tungstenite = "0.29"

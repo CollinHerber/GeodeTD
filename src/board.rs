@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use geode_td_shared::SharedBoardLayout;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -51,6 +52,23 @@ impl Board {
 
     pub fn reset_for_mode(&mut self, mode: GameMode) {
         *self = Board::for_mode(mode);
+    }
+
+    pub fn reset_for_shared_layout(&mut self, layout: &SharedBoardLayout) {
+        let checkpoints = layout
+            .checkpoints
+            .iter()
+            .map(|point| GridPos::new(point.col, point.row))
+            .collect::<Vec<_>>();
+        let path = find_complete_path(&HashSet::new(), &checkpoints)
+            .expect("server layout should always have an empty-board path");
+
+        *self = Self {
+            towers: HashMap::new(),
+            walls: HashSet::new(),
+            path,
+            checkpoints,
+        };
     }
 
     pub fn occupied_cells(&self) -> HashSet<GridPos> {

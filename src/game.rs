@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::constants::{OFFER_COUNT, WAVE_COUNTDOWN_SECONDS};
-use crate::gem::{GEM_KINDS, GemKind};
+use crate::constants::{CHANCE_BASE_COST, CHANCE_COST_STEP, OFFER_COUNT, WAVE_COUNTDOWN_SECONDS};
+use crate::gem::{GEM_KINDS, GemGrade, GemKind};
 use crate::rng::OfferRng;
 
 #[derive(Resource)]
@@ -15,6 +15,9 @@ pub struct Game {
     pub lives: i32,
     pub coins: u32,
     pub offers: [Option<GemKind>; OFFER_COUNT],
+    /// Grade rolled for each offer from `chances`; only meaningful where the
+    /// matching `offers` slot is `Some`.
+    pub offer_grades: [GemGrade; OFFER_COUNT],
     pub selected_offer: Option<usize>,
     pub placed_starters: [Option<Entity>; OFFER_COUNT],
     pub pending_enemies: u32,
@@ -28,6 +31,8 @@ pub struct Game {
     pub keep_candidate: Option<Entity>,
     pub shown_aura_ranges: HashSet<Entity>,
     pub show_path_overlay: bool,
+    /// Gold-bought odds that bias the grade of each offered starter.
+    pub chances: UpgradeChances,
     pub paused: bool,
     pub speed: u8,
 }
@@ -48,6 +53,8 @@ impl Game {
             lives: 20,
             coins: 0,
             offers: random_offers(&mut rng),
+            // Default chances roll Chipped, so the initial grades match the offers.
+            offer_grades: [GemGrade::Chipped; OFFER_COUNT],
             selected_offer: None,
             placed_starters: [None; OFFER_COUNT],
             pending_enemies: 0,
@@ -60,6 +67,7 @@ impl Game {
             keep_candidate: None,
             shown_aura_ranges: HashSet::new(),
             show_path_overlay: true,
+            chances: UpgradeChances::new(),
             paused: false,
             speed: 1,
         }
@@ -67,6 +75,19 @@ impl Game {
 
     pub fn selected_gem(&self) -> Option<GemKind> {
         self.selected_offer.and_then(|index| self.offers[index])
+    }
+
+    /// Grade of the currently selected offer (pairs with [`Game::selected_gem`]).
+    pub fn selected_offer_grade(&self) -> Option<GemGrade> {
+        self.selected_offer.map(|index| self.offer_grades[index])
+    }
+
+    /// Re-rolls the five offers' kinds and grades; grades are weighted by `chances`.
+    pub fn roll_offers(&mut self) {
+        for index in 0..OFFER_COUNT {
+            self.offers[index] = Some(GEM_KINDS[self.rng.next_index(GEM_KINDS.len())]);
+            self.offer_grades[index] = self.chances.roll(&mut self.rng);
+        }
     }
 
     pub fn speed_multiplier(&self) -> f32 {
@@ -82,7 +103,7 @@ impl Game {
     }
 
     pub fn refresh_offers(&mut self) {
-        self.offers = random_offers(&mut self.rng);
+        self.roll_offers();
         self.selected_offer = None;
         self.placed_starters = [None; OFFER_COUNT];
         self.keep_candidate = None;
@@ -171,6 +192,7 @@ impl Game {
         self.lives = 20;
         self.coins = 0;
         self.pending_enemies = 0;
+        self.chances = UpgradeChances::new();
         self.refresh_offers();
         self.selected_tower = None;
         self.upgrade_source = None;
@@ -188,7 +210,13 @@ impl Game {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AppScreen {
     Home,
+    PlayType,
     ModeSelect,
+    MultiplayerMenu,
+    DisplayName,
+    HostLobby,
+    JoinLobby,
+    WaitingLobby,
     HowToPlay,
     Settings,
     Playing,
@@ -330,6 +358,91 @@ impl RoundPlan {
                 flying: false,
             },
         }
+    }
+}
+
+/// Global, gold-bought odds that bias the grade of each offered starter. Each
+/// level is a 10% step for one upgradable grade (`[Flawed, Regular, Cut, Perfect]`);
+/// whatever is left over is the chance of a Chipped offer.
+#[derive(Clone, Copy)]
+pub struct UpgradeChances {
+    levels: [u8; UpgradeChances::TIERS],
+}
+
+#[allow(dead_code)]
+impl UpgradeChances {
+    pub const TIERS: usize = 4;
+    /// Max purchasable steps per tier: 30% Flawed/Regular/Cut, 10% Perfect.
+    const CAPS: [u8; UpgradeChances::TIERS] = [3, 3, 3, 1];
+
+    pub fn new() -> Self {
+        Self {
+            levels: [0; Self::TIERS],
+        }
+    }
+
+    /// Percent chance (0..=cap*10) of the offer landing on `tier`'s grade.
+    pub fn pct(&self, tier: usize) -> u32 {
+        self.levels[tier] as u32 * 10
+    }
+
+    /// Leftover percent that stays Chipped.
+    pub fn chipped_pct(&self) -> u32 {
+        100 - (0..Self::TIERS).map(|tier| self.pct(tier)).sum::<u32>()
+    }
+
+    pub fn at_cap(&self, tier: usize) -> bool {
+        self.levels[tier] >= Self::CAPS[tier]
+    }
+
+    fn total_levels(&self) -> u32 {
+        self.levels.iter().map(|&level| level as u32).sum()
+    }
+
+    /// Cost of the next purchase (any tier); rises with how many you've bought.
+    pub fn next_cost(&self) -> u32 {
+        CHANCE_BASE_COST + CHANCE_COST_STEP * self.total_levels()
+    }
+
+    /// Adds one 10% step to `tier`, returning the gold it costs, or `None` if the
+    /// tier is already at its cap.
+    pub fn buy(&mut self, tier: usize) -> Option<u32> {
+        if self.at_cap(tier) {
+            return None;
+        }
+        let cost = self.next_cost();
+        self.levels[tier] += 1;
+        Some(cost)
+    }
+
+    /// Rolls a grade for a fresh offer, weighted by the purchased odds. Higher
+    /// tiers occupy the top of the range; the remainder is Chipped.
+    pub fn roll(&self, rng: &mut OfferRng) -> GemGrade {
+        let roll = rng.next_index(100) as u32;
+        let mut threshold = 0;
+        for tier in (0..Self::TIERS).rev() {
+            threshold += self.pct(tier);
+            if roll < threshold {
+                return tier_grade(tier);
+            }
+        }
+        GemGrade::Chipped
+    }
+}
+
+impl Default for UpgradeChances {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The grade granted by chance tier `tier` (0 → Flawed … 3 → Perfect).
+pub fn tier_grade(tier: usize) -> GemGrade {
+    match tier {
+        0 => GemGrade::Flawed,
+        1 => GemGrade::Regular,
+        2 => GemGrade::Cut,
+        _ => GemGrade::Perfect,
     }
 }
 

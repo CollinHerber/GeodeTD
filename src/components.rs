@@ -143,6 +143,42 @@ pub struct ShowRangeButton;
 #[derive(Component)]
 pub struct ShowRangeButtonText;
 
+/// Top-bar button that opens/closes the upgrading-chances panel.
+#[derive(Component)]
+#[allow(dead_code)]
+pub struct ChancesButton;
+
+/// Root of the upgrading-chances panel (toggled open/closed).
+#[derive(Component)]
+#[allow(dead_code)]
+pub struct ChancesPanel;
+
+/// A "+10%" buy button for one chance tier (0 → Flawed … 3 → Perfect).
+#[derive(Component)]
+#[allow(dead_code)]
+pub struct ChanceBuyButton {
+    pub tier: usize,
+}
+
+/// The label for one tier row, refreshed with its current odds.
+#[derive(Component)]
+#[allow(dead_code)]
+pub struct ChanceRowText {
+    pub tier: usize,
+}
+
+/// The label inside a tier's buy button, refreshed with the next cost.
+#[derive(Component)]
+#[allow(dead_code)]
+pub struct ChanceBuyText {
+    pub tier: usize,
+}
+
+/// Header line of the chances panel showing current gold / Chipped odds.
+#[derive(Component)]
+#[allow(dead_code)]
+pub struct ChancesHeaderText;
+
 /// The button that commits the player's chosen starter once all five are placed.
 #[derive(Component)]
 pub struct ConfirmKeepButton;
@@ -173,6 +209,24 @@ pub struct SettingsScreen;
 pub struct ModeSelectScreen;
 
 #[derive(Component, Clone, Copy)]
+pub struct PlayTypeScreen;
+
+#[derive(Component, Clone, Copy)]
+pub struct MultiplayerMenuScreen;
+
+#[derive(Component, Clone, Copy)]
+pub struct DisplayNameScreen;
+
+#[derive(Component, Clone, Copy)]
+pub struct HostLobbyScreen;
+
+#[derive(Component, Clone, Copy)]
+pub struct JoinLobbyScreen;
+
+#[derive(Component, Clone, Copy)]
+pub struct WaitingLobbyScreen;
+
+#[derive(Component, Clone, Copy)]
 pub struct HowToPlayScreen;
 
 #[derive(Component, Clone, Copy)]
@@ -185,9 +239,41 @@ pub struct MenuButton {
     pub size: Vec2,
 }
 
+#[derive(Component)]
+pub struct LobbyRowButton {
+    pub lobby_id: String,
+    pub center: Vec2,
+    pub size: Vec2,
+}
+
+#[derive(Component, Clone, Copy)]
+pub struct TextInputDisplay {
+    pub field: TextInputField,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TextInputField {
+    DisplayName,
+    LobbyName,
+}
+
+#[derive(Component, Clone, Copy)]
+pub struct MultiplayerStatusText;
+
+#[derive(Component, Clone, Copy)]
+pub struct MultiplayerDynamic;
+
 #[derive(Clone, Copy)]
 pub enum MenuAction {
     Play,
+    SinglePlayer,
+    Multiplayer,
+    Host,
+    Join,
+    SubmitDisplayName,
+    CreateLobby,
+    StartMultiplayerGame,
+    LeaveLobby,
     Standard,
     Random,
     HowToPlay,
