@@ -163,13 +163,18 @@ fn spawn_enemy(
 
     // Flying enemies start a layer higher so they read as airborne above towers.
     let z = if plan.flying { 11.0 } else { 10.0 };
-    let mut sprite = Sprite::from_atlas_image(
-        enemy_art.gemling_image.clone(),
-        TextureAtlas {
-            layout: enemy_art.gemling_layout.clone(),
-            index: 0,
-        },
-    );
+    let (image, layout) = if plan.flying {
+        (
+            enemy_art.gem_bird_image.clone(),
+            enemy_art.gem_bird_layout.clone(),
+        )
+    } else {
+        (
+            enemy_art.gemling_image.clone(),
+            enemy_art.gemling_layout.clone(),
+        )
+    };
+    let mut sprite = Sprite::from_atlas_image(image, TextureAtlas { layout, index: 0 });
     sprite.custom_size = Some(Vec2::splat(size));
     sprite.color = plan.kind.accent();
 
