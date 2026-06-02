@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+## [0.3.0] - 2026-06-02
+
+### Bug Fixes
+- Make flying enemies go to the path points (47145ed)
+- Resolving the upgrade process issues (ef34d7e)
+
+### Features
+- Add bird sprite (d83caf1)
+- Adding in monster and tower visuals for flare (52a2df6)
+- Add in confirm pick gem button (7d7a76f)
+- Completely rework towers and their base abilities (654ea49)
+
 ## [0.2.3] - 2026-06-01
 
 ### Bug Fixes
