@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::constants::{OFFER_COUNT, WAVE_COUNTDOWN_SECONDS};
@@ -25,6 +26,8 @@ pub struct Game {
     pub upgrade_source: Option<Entity>,
     /// A placed starter the player has selected but not yet confirmed to keep.
     pub keep_candidate: Option<Entity>,
+    pub shown_aura_ranges: HashSet<Entity>,
+    pub show_path_overlay: bool,
     pub paused: bool,
     pub speed: u8,
 }
@@ -55,6 +58,8 @@ impl Game {
             selected_tower: None,
             upgrade_source: None,
             keep_candidate: None,
+            shown_aura_ranges: HashSet::new(),
+            show_path_overlay: true,
             paused: false,
             speed: 1,
         }
@@ -88,6 +93,12 @@ impl Game {
         self.selected_offer = None;
         self.placed_starters = [None; OFFER_COUNT];
         self.keep_candidate = None;
+    }
+
+    pub fn toggle_aura_range(&mut self, tower: Entity) {
+        if !self.shown_aura_ranges.insert(tower) {
+            self.shown_aura_ranges.remove(&tower);
+        }
     }
 
     pub fn all_starters_placed(&self) -> bool {
@@ -163,6 +174,8 @@ impl Game {
         self.refresh_offers();
         self.selected_tower = None;
         self.upgrade_source = None;
+        self.keep_candidate = None;
+        self.shown_aura_ranges.clear();
         self.paused = false;
         self.speed = 1;
         self.message = format!(

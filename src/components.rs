@@ -35,6 +35,13 @@ pub struct Enemy {
     pub flying: bool,
 }
 
+#[derive(Component)]
+pub struct EnemyAnimation {
+    pub first: usize,
+    pub last: usize,
+    pub timer: Timer,
+}
+
 /// Temporary movement slow applied by Sapphire towers. Reapplying refreshes it.
 #[derive(Component)]
 pub struct Slowed {
@@ -53,6 +60,17 @@ pub struct Poison {
 #[derive(Component)]
 pub struct ShotEffect {
     pub timer: Timer,
+}
+
+#[derive(Component)]
+pub struct VfxFade {
+    pub duration: f32,
+    pub velocity: Vec2,
+    pub start_size: Vec2,
+    pub end_size: Vec2,
+    pub rgb: [f32; 3],
+    pub start_alpha: f32,
+    pub end_alpha: f32,
 }
 
 #[derive(Component)]
@@ -114,6 +132,12 @@ pub struct SelectionMenu;
 #[derive(Component)]
 pub struct UpgradeButton;
 
+#[derive(Component)]
+pub struct ShowRangeButton;
+
+#[derive(Component)]
+pub struct ShowRangeButtonText;
+
 /// The button that commits the player's chosen starter once all five are placed.
 #[derive(Component)]
 pub struct ConfirmKeepButton;
@@ -127,6 +151,9 @@ pub struct UpgradeButtonText;
 /// upgrade. Rebuilt every frame while an upgrade is in progress.
 #[derive(Component)]
 pub struct UpgradeHighlight;
+
+#[derive(Component)]
+pub struct AuraRangeSegment;
 
 #[derive(Component, Clone, Copy)]
 pub struct HomeScreen;
@@ -157,5 +184,6 @@ pub enum MenuAction {
     Random,
     HowToPlay,
     Settings,
+    TogglePathOverlay,
     Home,
 }

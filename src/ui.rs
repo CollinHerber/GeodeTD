@@ -4,11 +4,12 @@ use std::collections::HashMap;
 
 use crate::board::Board;
 use crate::components::{
-    CheckpointMarker, ConfirmKeepButton, Enemy, EscapeMenu, EscapeMenuAction, EscapeMenuButton,
-    EscapeMenuInfo, GameWorld, HomeScreen, HowToPlayScreen, HudText, MenuAction, MenuButton,
-    ModeSelectScreen, OfferButton, OfferLabel, OfferVisual, PathMarker, RoundInfoBody,
-    RoundInfoTitle, SelectionMenu, SettingsScreen, SpeedButton, SpeedText, StarterCandidate,
-    TopBarText, Tower, UpgradeButton, UpgradeButtonText, UpgradeHighlight,
+    AuraRangeSegment, CheckpointMarker, ConfirmKeepButton, Enemy, EscapeMenu, EscapeMenuAction,
+    EscapeMenuButton, EscapeMenuInfo, GameWorld, HomeScreen, HowToPlayScreen, HudText, MenuAction,
+    MenuButton, ModeSelectScreen, OfferButton, OfferLabel, OfferVisual, PathMarker, RoundInfoBody,
+    RoundInfoTitle, SelectionMenu, SettingsScreen, ShowRangeButton, ShowRangeButtonText,
+    SpeedButton, SpeedText, StarterCandidate, TopBarText, Tower, UpgradeButton, UpgradeButtonText,
+    UpgradeHighlight,
 };
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
 use crate::game::{AppScreen, Game, GameMode, Phase, RoundPlan};
@@ -67,7 +68,7 @@ pub fn handle_menu_clicks(
             despawn_all(&mut commands, &game_entities);
             board.reset_for_mode(GameMode::Standard);
             game.reset_for_mode(GameMode::Standard);
-            spawn_game_scene(&mut commands, &board);
+            spawn_game_scene(&mut commands, &board, game.show_path_overlay);
             game.screen = AppScreen::Playing;
         }
         MenuAction::Random => {
@@ -78,7 +79,7 @@ pub fn handle_menu_clicks(
             despawn_all(&mut commands, &game_entities);
             board.reset_for_mode(GameMode::Random);
             game.reset_for_mode(GameMode::Random);
-            spawn_game_scene(&mut commands, &board);
+            spawn_game_scene(&mut commands, &board, game.show_path_overlay);
             game.screen = AppScreen::Playing;
         }
         MenuAction::HowToPlay => {
@@ -89,7 +90,14 @@ pub fn handle_menu_clicks(
         }
         MenuAction::Settings => {
             despawn_all(&mut commands, &home_entities);
-            spawn_settings_screen(&mut commands);
+            spawn_settings_screen(&mut commands, game.show_path_overlay);
+            game.paused = false;
+            game.screen = AppScreen::Settings;
+        }
+        MenuAction::TogglePathOverlay => {
+            game.show_path_overlay = !game.show_path_overlay;
+            despawn_all(&mut commands, &settings_entities);
+            spawn_settings_screen(&mut commands, game.show_path_overlay);
             game.paused = false;
             game.screen = AppScreen::Settings;
         }
@@ -136,7 +144,7 @@ pub fn handle_escape_menu_buttons(
                 board.reset_for_mode(mode);
                 game.reset_for_mode(mode);
                 reset_camera(&mut camera);
-                spawn_game_scene(&mut commands, &board);
+                spawn_game_scene(&mut commands, &board, game.show_path_overlay);
             }
             EscapeMenuAction::Home => {
                 despawn_all(&mut commands, &home_entities);
@@ -160,9 +168,9 @@ pub fn handle_escape_menu_buttons(
     }
 }
 
-fn spawn_game_scene(commands: &mut Commands, board: &Board) {
+fn spawn_game_scene(commands: &mut Commands, board: &Board, show_path_overlay: bool) {
     spawn_board_tiles(commands, board);
-    spawn_path_markers(commands, &board.path);
+    spawn_path_markers(commands, &board.path, show_path_overlay);
     spawn_checkpoint_markers(commands, &board.checkpoints);
     spawn_play_ui(commands);
     spawn_offer_bar(commands);
@@ -286,11 +294,12 @@ pub fn refresh_path_markers(
     commands: &mut Commands,
     path_markers: &Query<Entity, With<PathMarker>>,
     path: &[GridPos],
+    show_path_overlay: bool,
 ) {
     for entity in path_markers.iter() {
         commands.entity(entity).despawn();
     }
-    spawn_path_markers(commands, path);
+    spawn_path_markers(commands, path, show_path_overlay);
 }
 
 pub fn clear_selection_menu(
@@ -318,7 +327,11 @@ pub fn spawn_selection_menu(commands: &mut Commands, tower: &Tower) {
     );
 
     spawn_info_panel(commands, &title, &stats);
-    spawn_action_bar(commands, &action);
+    spawn_action_bar(
+        commands,
+        &action,
+        matches!(tower.gem.effect(tower.grade), GemEffect::Haste { .. }),
+    );
 }
 
 /// Read-only stat panel for a gem offer (before placement). Shows the same stats
@@ -422,7 +435,7 @@ fn spawn_info_panel(commands: &mut Commands, title: &str, body: &str) {
         });
 }
 
-fn spawn_action_bar(commands: &mut Commands, action: &str) {
+fn spawn_action_bar(commands: &mut Commands, action: &str, show_range_button: bool) {
     commands
         .spawn((
             Node {
@@ -433,6 +446,7 @@ fn spawn_action_bar(commands: &mut Commands, action: &str) {
                 height: px(86),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
+                column_gap: px(12),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.035, 0.04, 0.045, 0.95)),
@@ -463,6 +477,32 @@ fn spawn_action_bar(commands: &mut Commands, action: &str) {
                     UpgradeButtonText,
                 ));
             });
+
+            if show_range_button {
+                bar.spawn((
+                    Button,
+                    Node {
+                        width: px(150),
+                        height: px(46),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.15, 0.27, 0.29)),
+                    ShowRangeButton,
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new("Show Range"),
+                        TextFont {
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.92, 0.98, 0.98)),
+                        ShowRangeButtonText,
+                    ));
+                });
+            }
         });
 }
 
@@ -677,6 +717,35 @@ pub fn update_upgrade_button(
     }
 }
 
+pub fn update_show_range_button(
+    game: Res<Game>,
+    mut buttons: Query<&mut BackgroundColor, With<ShowRangeButton>>,
+    mut labels: Query<&mut Text, With<ShowRangeButtonText>>,
+) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    let shown = game
+        .selected_tower
+        .is_some_and(|tower| game.shown_aura_ranges.contains(&tower));
+
+    for mut color in &mut buttons {
+        color.0 = if shown {
+            Color::srgb(0.12, 0.36, 0.34)
+        } else {
+            Color::srgb(0.15, 0.27, 0.29)
+        };
+    }
+    for mut text in &mut labels {
+        **text = if shown {
+            "Hide Range".to_string()
+        } else {
+            "Show Range".to_string()
+        };
+    }
+}
+
 fn upgrade_is_available(
     game: &Game,
     towers: &Query<(Entity, &Tower)>,
@@ -760,6 +829,57 @@ pub fn sync_upgrade_highlights(
     }
 }
 
+pub fn sync_aura_range_rings(
+    mut commands: Commands,
+    time: Res<Time>,
+    game: Res<Game>,
+    towers: Query<(Entity, &Transform, &Tower)>,
+    rings: Query<Entity, With<AuraRangeSegment>>,
+) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    for entity in &rings {
+        commands.entity(entity).despawn();
+    }
+
+    const SEGMENTS: usize = 72;
+    let pulse = (time.elapsed_secs() * 2.8).sin() * 0.5 + 0.5;
+
+    for (entity, transform, tower) in &towers {
+        if !game.shown_aura_ranges.contains(&entity) {
+            continue;
+        }
+
+        if !matches!(tower.gem.effect(tower.grade), GemEffect::Haste { .. }) {
+            continue;
+        }
+
+        let center = transform.translation.truncate();
+        let rgb = tower.gem.srgb();
+        let radius = tower.range + pulse * 4.0;
+        let segment_length = std::f32::consts::TAU * radius / SEGMENTS as f32 * 0.62;
+        let thickness = 4.0 + pulse * 2.0;
+        let alpha = 0.20 + pulse * 0.18;
+
+        for index in 0..SEGMENTS {
+            let angle = index as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+            let direction = Vec2::new(angle.cos(), angle.sin());
+            commands.spawn((
+                Sprite::from_color(
+                    Color::srgba(rgb[0], rgb[1], rgb[2], alpha),
+                    Vec2::new(segment_length, thickness),
+                ),
+                Transform::from_translation((center + direction * radius).extend(4.2))
+                    .with_rotation(Quat::from_rotation_z(angle + std::f32::consts::FRAC_PI_2)),
+                AuraRangeSegment,
+                GameWorld,
+            ));
+        }
+    }
+}
+
 pub fn tower_sprite_size(grade: GemGrade) -> Vec2 {
     Vec2::splat(CELL_SIZE * 0.58 * grade.size_multiplier())
 }
@@ -791,14 +911,14 @@ fn spawn_board_tiles(commands: &mut Commands, board: &Board) {
     }
 }
 
-fn spawn_path_markers(commands: &mut Commands, path: &[GridPos]) {
-    if path.is_empty() {
+fn spawn_path_markers(commands: &mut Commands, path: &[GridPos], show_path_overlay: bool) {
+    if path.is_empty() || !show_path_overlay {
         return;
     }
 
     // The route is now sparse, any-angle waypoints, so lay evenly spaced dots
     // along each straight run to keep a continuous trail.
-    let spacing = CELL_SIZE * 0.7;
+    let spacing = CELL_SIZE * 1.05;
     let mut points: Vec<Vec2> = Vec::new();
     for window in path.windows(2) {
         let start = grid_to_world(window[0]);
@@ -813,8 +933,8 @@ fn spawn_path_markers(commands: &mut Commands, path: &[GridPos]) {
     for point in points {
         commands.spawn((
             Sprite::from_color(
-                Color::srgba(0.88, 0.78, 0.42, 0.28),
-                Vec2::splat(CELL_SIZE * 0.34),
+                Color::srgba(0.88, 0.78, 0.42, 0.10),
+                Vec2::splat(CELL_SIZE * 0.22),
             ),
             Transform::from_translation(point.extend(1.0)),
             PathMarker,
@@ -1233,7 +1353,7 @@ and every 20th round sends a single high-health boss.\n\
 Use the mouse wheel to zoom, and hold left click to pan."
 }
 
-fn spawn_settings_screen(commands: &mut Commands) {
+fn spawn_settings_screen(commands: &mut Commands, show_path_overlay: bool) {
     commands.spawn((
         Sprite::from_color(Color::srgb(0.04, 0.045, 0.052), Vec2::new(1280.0, 760.0)),
         Transform::from_xyz(0.0, 0.0, -10.0),
@@ -1264,7 +1384,7 @@ fn spawn_settings_screen(commands: &mut Commands) {
         SettingsScreen,
     ));
     commands.spawn((
-        Text2d::new("Settings will live here."),
+        Text2d::new("Visual options"),
         TextFont {
             font_size: 20.0,
             ..default()
@@ -1273,6 +1393,18 @@ fn spawn_settings_screen(commands: &mut Commands) {
         Transform::from_xyz(0.0, 92.0, 20.0),
         SettingsScreen,
     ));
+    spawn_menu_button(
+        commands,
+        Vec2::new(0.0, -54.0),
+        Vec2::new(300.0, 58.0),
+        if show_path_overlay {
+            "Path Overlay: On"
+        } else {
+            "Path Overlay: Off"
+        },
+        MenuAction::TogglePathOverlay,
+        SettingsScreen,
+    );
     spawn_menu_button(
         commands,
         Vec2::new(0.0, -146.0),

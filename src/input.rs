@@ -180,6 +180,43 @@ pub fn handle_tower_action_clicks(
     }
 }
 
+pub fn handle_show_range_clicks(
+    interactions: Query<
+        &Interaction,
+        (
+            Changed<Interaction>,
+            With<crate::components::ShowRangeButton>,
+        ),
+    >,
+    mut camera_drag: ResMut<CameraDrag>,
+    mut game: ResMut<Game>,
+    towers: Query<&Tower>,
+) {
+    if game.screen != AppScreen::Playing || game.paused {
+        return;
+    }
+
+    for interaction in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        camera_drag.suppress_click = true;
+        let Some(tower_entity) = game.selected_tower else {
+            continue;
+        };
+        let Ok(tower) = towers.get(tower_entity) else {
+            continue;
+        };
+        if matches!(
+            tower.gem.effect(tower.grade),
+            crate::gem::GemEffect::Haste { .. }
+        ) {
+            game.toggle_aura_range(tower_entity);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_keep_confirm_clicks(
     mut commands: Commands,
@@ -486,13 +523,14 @@ fn keep_starter(
         if let Some(pos) = grid_pos_for_entity(board, starter) {
             commands.entity(starter).despawn();
             board.towers.remove(&pos);
+            game.shown_aura_ranges.remove(&starter);
             board.walls.insert(pos);
             spawn_starter_wall(commands, pos);
         }
     }
 
     board.recalculate_path();
-    refresh_path_markers(commands, path_markers, &board.path);
+    refresh_path_markers(commands, path_markers, &board.path, game.show_path_overlay);
     clear_selection_menu(commands, menu_items);
     spawn_selection_menu(commands, kept_tower);
     game.begin_countdown(kept_gem);
@@ -563,10 +601,12 @@ fn complete_upgrade(
     if let Some(pos) = grid_pos_for_entity(board, sacrifice_entity) {
         commands.entity(sacrifice_entity).despawn();
         board.towers.remove(&pos);
+        game.shown_aura_ranges.remove(&sacrifice_entity);
         board.walls.insert(pos);
         spawn_starter_wall(commands, pos);
     } else {
         commands.entity(sacrifice_entity).despawn();
+        game.shown_aura_ranges.remove(&sacrifice_entity);
     }
     clear_selection_menu(commands, menu_items);
     spawn_selection_menu(commands, &source_tower);
@@ -623,7 +663,7 @@ fn place_tower(
     let tower_entity = spawn_tower(commands, grid_pos, gem, gem_images, Some(offer_index));
     board.towers.insert(grid_pos, tower_entity);
     board.path = new_path;
-    refresh_path_markers(commands, path_markers, &board.path);
+    refresh_path_markers(commands, path_markers, &board.path, game.show_path_overlay);
     clear_selection_menu(commands, menu_items);
     game.selected_tower = Some(tower_entity);
     game.selected_offer = None;

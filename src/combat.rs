@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::components::{Enemy, GameWorld, Poison, ShotEffect, Slowed, Tower};
+use crate::components::{Enemy, GameWorld, Poison, ShotEffect, Slowed, Tower, VfxFade};
 use crate::game::{AppScreen, Game, RoundKind};
 use crate::gem::GemEffect;
 
@@ -91,7 +91,7 @@ pub fn tower_attack(
 
         // Gather secondary damage and the beams to draw for area effects.
         let mut secondary: Vec<(Entity, f32)> = Vec::new();
-        let mut beams: Vec<(Vec2, Vec2, Color, f32)> = Vec::new();
+        let mut beams: Vec<(Vec2, Vec2, [f32; 3], f32)> = Vec::new();
 
         match effect {
             GemEffect::Splash {
@@ -122,14 +122,14 @@ pub fn tower_attack(
                     others.into_iter().take(targets.saturating_sub(1) as usize)
                 {
                     secondary.push((entity, damage * damage_fraction));
-                    beams.push((tower_position, position, tower.gem.color(), 4.0));
+                    beams.push((tower_position, position, tower.gem.srgb(), 4.0));
                 }
             }
             _ => {}
         }
 
         // Primary beam, drawn last so it sits on top.
-        beams.push((tower_position, target_position, tower.gem.color(), 4.0));
+        beams.push((tower_position, target_position, tower.gem.srgb(), 4.0));
 
         if let Ok((_, _, mut enemy)) = enemies.get_mut(target) {
             enemy.health -= damage;
@@ -276,13 +276,29 @@ pub fn cleanup_effects(
     mut commands: Commands,
     time: Res<Time>,
     game: Res<Game>,
-    mut effects: Query<(Entity, &mut ShotEffect)>,
+    mut effects: Query<(
+        Entity,
+        &mut ShotEffect,
+        &mut Transform,
+        &mut Sprite,
+        Option<&VfxFade>,
+    )>,
 ) {
     if game.screen != AppScreen::Playing || game.paused {
         return;
     }
 
-    for (entity, mut effect) in &mut effects {
+    let delta = time.delta_secs() * game.speed_multiplier();
+    for (entity, mut effect, mut transform, mut sprite, fade) in &mut effects {
+        if let Some(fade) = fade {
+            let progress = (effect.timer.elapsed_secs() / fade.duration).clamp(0.0, 1.0);
+            transform.translation += (fade.velocity * delta).extend(0.0);
+            sprite.custom_size =
+                Some(fade.start_size + (fade.end_size - fade.start_size) * progress);
+            let alpha = fade.start_alpha + (fade.end_alpha - fade.start_alpha) * progress;
+            sprite.color = Color::srgba(fade.rgb[0], fade.rgb[1], fade.rgb[2], alpha);
+        }
+
         effect
             .timer
             .tick(time.delta().mul_f32(game.speed_multiplier()));
@@ -292,7 +308,7 @@ pub fn cleanup_effects(
     }
 }
 
-fn spawn_beam(commands: &mut Commands, start: Vec2, end: Vec2, color: Color, thickness: f32) {
+fn spawn_beam(commands: &mut Commands, start: Vec2, end: Vec2, rgb: [f32; 3], thickness: f32) {
     let delta = end - start;
     let length = delta.length();
     if length <= 1.0 {
@@ -302,13 +318,115 @@ fn spawn_beam(commands: &mut Commands, start: Vec2, end: Vec2, color: Color, thi
     let midpoint = start + delta * 0.5;
     let angle = delta.y.atan2(delta.x);
 
+    spawn_fading_sprite(
+        commands,
+        midpoint,
+        angle,
+        rgb,
+        Vec2::new(length, thickness * 3.4),
+        Vec2::new(length, thickness * 4.4),
+        0.24,
+        0.0,
+        0.14,
+        Vec2::ZERO,
+        19.0,
+    );
+    spawn_fading_sprite(
+        commands,
+        midpoint,
+        angle,
+        rgb,
+        Vec2::new(length, thickness),
+        Vec2::new(length, thickness * 1.25),
+        0.95,
+        0.0,
+        0.10,
+        Vec2::ZERO,
+        20.0,
+    );
+    spawn_pulse(commands, start, rgb, 14.0, 34.0, 0.18, 18.0);
+    spawn_pulse(commands, end, rgb, 20.0, 58.0, 0.20, 21.0);
+    spawn_sparks(commands, end, delta.normalize(), rgb);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_fading_sprite(
+    commands: &mut Commands,
+    position: Vec2,
+    angle: f32,
+    rgb: [f32; 3],
+    start_size: Vec2,
+    end_size: Vec2,
+    start_alpha: f32,
+    end_alpha: f32,
+    duration: f32,
+    velocity: Vec2,
+    z: f32,
+) {
     commands.spawn((
-        Sprite::from_color(color, Vec2::new(length, thickness)),
-        Transform::from_translation(midpoint.extend(20.0))
-            .with_rotation(Quat::from_rotation_z(angle)),
+        Sprite::from_color(
+            Color::srgba(rgb[0], rgb[1], rgb[2], start_alpha),
+            start_size,
+        ),
+        Transform::from_translation(position.extend(z)).with_rotation(Quat::from_rotation_z(angle)),
         ShotEffect {
-            timer: Timer::from_seconds(0.08, TimerMode::Once),
+            timer: Timer::from_seconds(duration, TimerMode::Once),
+        },
+        VfxFade {
+            duration,
+            velocity,
+            start_size,
+            end_size,
+            rgb,
+            start_alpha,
+            end_alpha,
         },
         GameWorld,
     ));
+}
+
+fn spawn_pulse(
+    commands: &mut Commands,
+    position: Vec2,
+    rgb: [f32; 3],
+    start_size: f32,
+    end_size: f32,
+    duration: f32,
+    z: f32,
+) {
+    spawn_fading_sprite(
+        commands,
+        position,
+        std::f32::consts::FRAC_PI_4,
+        rgb,
+        Vec2::splat(start_size),
+        Vec2::splat(end_size),
+        0.42,
+        0.0,
+        duration,
+        Vec2::ZERO,
+        z,
+    );
+}
+
+fn spawn_sparks(commands: &mut Commands, position: Vec2, direction: Vec2, rgb: [f32; 3]) {
+    let base_angle = direction.y.atan2(direction.x);
+    for index in 0..6 {
+        let offset = -0.9 + index as f32 * 0.36;
+        let angle = base_angle + offset;
+        let velocity = Vec2::new(angle.cos(), angle.sin()) * (90.0 + index as f32 * 13.0);
+        spawn_fading_sprite(
+            commands,
+            position,
+            angle,
+            rgb,
+            Vec2::new(14.0, 3.0),
+            Vec2::new(4.0, 1.0),
+            0.72,
+            0.0,
+            0.22,
+            velocity,
+            22.0,
+        );
+    }
 }

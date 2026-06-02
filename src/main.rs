@@ -2,6 +2,7 @@ mod board;
 mod combat;
 mod components;
 mod constants;
+mod enemy_art;
 mod game;
 mod gem;
 mod gem_visual;
@@ -17,18 +18,20 @@ use board::Board;
 use combat::{
     apply_poison, cleanup_effects, reap_enemies, tower_attack, update_enemy_visuals, update_slow,
 };
+use enemy_art::EnemyArt;
 use game::Game;
 use gem_visual::GemImages;
 use input::{
-    CameraDrag, handle_keep_confirm_clicks, handle_offer_clicks, handle_speed_clicks,
-    handle_tower_action_clicks, pan_and_zoom_camera, place_or_select, select_offer,
+    CameraDrag, handle_keep_confirm_clicks, handle_offer_clicks, handle_show_range_clicks,
+    handle_speed_clicks, handle_tower_action_clicks, pan_and_zoom_camera, place_or_select,
+    select_offer,
 };
 use ui::{
-    handle_escape_menu_buttons, handle_menu_clicks, setup, sync_upgrade_highlights,
-    toggle_escape_menu, update_hud, update_offer_visuals, update_round_info, update_top_bar,
-    update_upgrade_button,
+    handle_escape_menu_buttons, handle_menu_clicks, setup, sync_aura_range_rings,
+    sync_upgrade_highlights, toggle_escape_menu, update_hud, update_offer_visuals,
+    update_round_info, update_show_range_button, update_top_bar, update_upgrade_button,
 };
-use wave::{move_enemies, run_wave, update_wave_countdown};
+use wave::{animate_enemies, move_enemies, run_wave, update_wave_countdown};
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 enum GameSet {
@@ -53,6 +56,7 @@ fn main() {
             ..default()
         }))
         .init_resource::<GemImages>()
+        .init_resource::<EnemyArt>()
         .add_systems(Startup, setup)
         .configure_sets(
             Update,
@@ -72,6 +76,7 @@ fn main() {
                 handle_offer_clicks,
                 handle_speed_clicks,
                 handle_tower_action_clicks,
+                handle_show_range_clicks,
                 handle_keep_confirm_clicks,
                 place_or_select,
             )
@@ -88,6 +93,7 @@ fn main() {
                 reap_enemies,
                 update_slow,
                 move_enemies,
+                animate_enemies,
                 update_enemy_visuals,
                 cleanup_effects,
             )
@@ -102,7 +108,9 @@ fn main() {
                 update_top_bar,
                 update_round_info,
                 update_upgrade_button,
+                update_show_range_button,
                 sync_upgrade_highlights,
+                sync_aura_range_rings,
             )
                 .chain()
                 .in_set(GameSet::Ui),

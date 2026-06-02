@@ -56,11 +56,6 @@ impl GemKind {
         self.def().name
     }
 
-    pub fn color(self) -> Color {
-        let [r, g, b] = self.def().srgb;
-        Color::srgb(r, g, b)
-    }
-
     pub fn srgb(self) -> [f32; 3] {
         self.def().srgb
     }
