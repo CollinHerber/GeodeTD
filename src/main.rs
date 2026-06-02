@@ -20,8 +20,8 @@ use combat::{
 use game::Game;
 use gem_visual::GemImages;
 use input::{
-    CameraDrag, handle_offer_clicks, handle_speed_clicks, handle_tower_action_clicks,
-    pan_and_zoom_camera, place_or_select, select_offer,
+    CameraDrag, handle_keep_confirm_clicks, handle_offer_clicks, handle_speed_clicks,
+    handle_tower_action_clicks, pan_and_zoom_camera, place_or_select, select_offer,
 };
 use ui::{
     handle_escape_menu_buttons, handle_menu_clicks, setup, sync_upgrade_highlights,
@@ -72,6 +72,7 @@ fn main() {
                 handle_offer_clicks,
                 handle_speed_clicks,
                 handle_tower_action_clicks,
+                handle_keep_confirm_clicks,
                 place_or_select,
             )
                 .chain()

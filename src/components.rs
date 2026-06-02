@@ -114,6 +114,10 @@ pub struct SelectionMenu;
 #[derive(Component)]
 pub struct UpgradeButton;
 
+/// The button that commits the player's chosen starter once all five are placed.
+#[derive(Component)]
+pub struct ConfirmKeepButton;
+
 /// The label inside the upgrade button, so its color can be dimmed when the
 /// upgrade is unavailable.
 #[derive(Component)]

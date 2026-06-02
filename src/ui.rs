@@ -4,11 +4,11 @@ use std::collections::HashMap;
 
 use crate::board::Board;
 use crate::components::{
-    CheckpointMarker, Enemy, EscapeMenu, EscapeMenuAction, EscapeMenuButton, EscapeMenuInfo,
-    GameWorld, HomeScreen, HowToPlayScreen, HudText, MenuAction, MenuButton, ModeSelectScreen,
-    OfferButton, OfferLabel, OfferVisual, PathMarker, RoundInfoBody, RoundInfoTitle, SelectionMenu,
-    SettingsScreen, SpeedButton, SpeedText, StarterCandidate, TopBarText, Tower, UpgradeButton,
-    UpgradeButtonText, UpgradeHighlight,
+    CheckpointMarker, ConfirmKeepButton, Enemy, EscapeMenu, EscapeMenuAction, EscapeMenuButton,
+    EscapeMenuInfo, GameWorld, HomeScreen, HowToPlayScreen, HudText, MenuAction, MenuButton,
+    ModeSelectScreen, OfferButton, OfferLabel, OfferVisual, PathMarker, RoundInfoBody,
+    RoundInfoTitle, SelectionMenu, SettingsScreen, SpeedButton, SpeedText, StarterCandidate,
+    TopBarText, Tower, UpgradeButton, UpgradeButtonText, UpgradeHighlight,
 };
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
 use crate::game::{AppScreen, Game, GameMode, Phase, RoundPlan};
@@ -335,6 +335,56 @@ pub fn spawn_gem_info(commands: &mut Commands, gem: GemKind) {
     spawn_info_panel(commands, &format!("Chipped {}", gem.name()), &body);
 }
 
+/// Shows the chosen starter's stats alongside a Confirm button that commits the
+/// keep once all five are placed.
+pub fn spawn_keep_confirm(commands: &mut Commands, gem: GemKind) {
+    spawn_gem_info(commands, gem);
+    spawn_confirm_bar(commands, &format!("Confirm: keep {}", gem.name()));
+}
+
+fn spawn_confirm_bar(commands: &mut Commands, action: &str) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: px(0),
+                left: px(0),
+                width: percent(100),
+                height: px(86),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.035, 0.04, 0.045, 0.95)),
+            SelectionMenu,
+            GameWorld,
+        ))
+        .with_children(|bar| {
+            bar.spawn((
+                Button,
+                Node {
+                    width: px(220),
+                    height: px(46),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.16, 0.32, 0.21)),
+                ConfirmKeepButton,
+            ))
+            .with_children(|button| {
+                button.spawn((
+                    Text::new(action.to_string()),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.93, 0.97, 0.92)),
+                ));
+            });
+        });
+}
+
 fn spawn_info_panel(commands: &mut Commands, title: &str, body: &str) {
     commands
         .spawn((
@@ -565,8 +615,10 @@ pub fn update_hud(game: Res<Game>, board: Res<Board>, mut hud: Query<&mut Text2d
     } else {
         String::new()
     };
-    let starter_prompt = if game.phase == Phase::Build && game.all_starters_placed() {
-        "      Click a placed starter to keep it"
+    let starter_prompt = if game.phase == Phase::Build && game.keep_candidate.is_some() {
+        "      Press Confirm to keep, or pick another starter"
+    } else if game.phase == Phase::Build && game.all_starters_placed() {
+        "      Click a starter to select, then Confirm (Ctrl+click = instant)"
     } else if game.phase == Phase::Build {
         "      Place all five starters"
     } else {
@@ -651,8 +703,9 @@ fn upgrade_is_available(
     })
 }
 
-/// While an upgrade is in progress, draws a halo behind every tower that can be
-/// sacrificed for it. Rebuilt each frame so it tracks the source's gem/grade.
+/// Draws halos behind relevant towers: gold behind every tower that can be
+/// sacrificed for an in-progress upgrade, or green behind the starter the player
+/// has chosen (but not yet confirmed) to keep. Rebuilt each frame.
 pub fn sync_upgrade_highlights(
     mut commands: Commands,
     game: Res<Game>,
@@ -667,31 +720,43 @@ pub fn sync_upgrade_highlights(
         commands.entity(entity).despawn();
     }
 
-    let Some(source) = game.upgrade_source else {
-        return;
-    };
-    let Some((gem, grade)) = towers
-        .get(source)
-        .ok()
-        .map(|(_, _, tower, _)| (tower.gem, tower.grade))
-    else {
-        return;
+    let spawn_halo = |commands: &mut Commands, position: Vec2, color: Color| {
+        commands.spawn((
+            Sprite::from_color(color, Vec2::splat(CELL_SIZE * 0.94)),
+            Transform::from_translation(position.extend(4.5)),
+            UpgradeHighlight,
+            GameWorld,
+        ));
     };
 
-    for (entity, transform, tower, starter) in &towers {
-        let eligible =
-            entity != source && starter.is_none() && tower.gem == gem && tower.grade == grade;
-        if eligible {
-            commands.spawn((
-                Sprite::from_color(
+    if let Some(source) = game.upgrade_source {
+        let Some((gem, grade)) = towers
+            .get(source)
+            .ok()
+            .map(|(_, _, tower, _)| (tower.gem, tower.grade))
+        else {
+            return;
+        };
+
+        for (entity, transform, tower, starter) in &towers {
+            let eligible =
+                entity != source && starter.is_none() && tower.gem == gem && tower.grade == grade;
+            if eligible {
+                spawn_halo(
+                    &mut commands,
+                    transform.translation.truncate(),
                     Color::srgba(1.0, 0.9, 0.32, 0.45),
-                    Vec2::splat(CELL_SIZE * 0.94),
-                ),
-                Transform::from_translation(transform.translation.truncate().extend(4.5)),
-                UpgradeHighlight,
-                GameWorld,
-            ));
+                );
+            }
         }
+    } else if let Some(candidate) = game.keep_candidate
+        && let Ok((_, transform, _, _)) = towers.get(candidate)
+    {
+        spawn_halo(
+            &mut commands,
+            transform.translation.truncate(),
+            Color::srgba(0.36, 0.92, 0.46, 0.5),
+        );
     }
 }
 

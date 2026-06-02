@@ -13,8 +13,8 @@ use crate::gem::GemGrade;
 use crate::gem_visual::GemImages;
 use crate::grid::{grid_to_world, world_to_grid};
 use crate::ui::{
-    clear_selection_menu, refresh_path_markers, spawn_gem_info, spawn_selection_menu,
-    tower_sprite_size,
+    clear_selection_menu, refresh_path_markers, spawn_gem_info, spawn_keep_confirm,
+    spawn_selection_menu, tower_sprite_size,
 };
 
 const MIN_CAMERA_SCALE: f32 = 0.45;
@@ -181,9 +181,51 @@ pub fn handle_tower_action_clicks(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub fn handle_keep_confirm_clicks(
+    mut commands: Commands,
+    interactions: Query<
+        &Interaction,
+        (
+            Changed<Interaction>,
+            With<crate::components::ConfirmKeepButton>,
+        ),
+    >,
+    mut camera_drag: ResMut<CameraDrag>,
+    mut game: ResMut<Game>,
+    mut board: ResMut<Board>,
+    path_markers: Query<Entity, With<PathMarker>>,
+    menu_items: Query<Entity, With<SelectionMenu>>,
+    mut towers: Query<(Entity, &mut Tower, &mut Sprite)>,
+) {
+    if game.screen != AppScreen::Playing || game.paused {
+        return;
+    }
+
+    for interaction in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        camera_drag.suppress_click = true;
+        let Some(candidate) = game.keep_candidate else {
+            continue;
+        };
+        keep_starter(
+            &mut commands,
+            &mut game,
+            &mut board,
+            &path_markers,
+            &menu_items,
+            &mut towers,
+            candidate,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn place_or_select(
     mut commands: Commands,
     buttons: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform)>,
     mut camera_drag: ResMut<CameraDrag>,
@@ -200,6 +242,8 @@ pub fn place_or_select(
     {
         return;
     }
+
+    let instant_keep = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
 
     if camera_drag.suppress_click {
         camera_drag.suppress_click = false;
@@ -226,15 +270,20 @@ pub fn place_or_select(
                 tower_entity,
             );
         } else if game.phase == Phase::Build && game.all_starters_placed() && is_starter_candidate {
-            keep_starter(
-                &mut commands,
-                &mut game,
-                &mut board,
-                &path_markers,
-                &menu_items,
-                &mut towers,
-                tower_entity,
-            );
+            // Default: pick a starter and wait for Confirm. Ctrl+click keeps now.
+            if instant_keep {
+                keep_starter(
+                    &mut commands,
+                    &mut game,
+                    &mut board,
+                    &path_markers,
+                    &menu_items,
+                    &mut towers,
+                    tower_entity,
+                );
+            } else {
+                select_keep_candidate(&mut commands, &mut game, &menu_items, &towers, tower_entity);
+            }
         } else if game.phase == Phase::Build && is_starter_candidate {
             inspect_starter_candidate(&mut commands, &mut game, &menu_items, &towers, tower_entity);
         } else {
@@ -243,10 +292,13 @@ pub fn place_or_select(
         return;
     }
 
-    let had_tower_display = game.selected_tower.is_some() || game.upgrade_source.is_some();
+    let had_tower_display = game.selected_tower.is_some()
+        || game.upgrade_source.is_some()
+        || game.keep_candidate.is_some();
     if had_tower_display {
         game.selected_tower = None;
         game.upgrade_source = None;
+        game.keep_candidate = None;
         clear_selection_menu(&mut commands, &menu_items);
     }
 
@@ -353,9 +405,36 @@ fn select_tower(
     game.selected_tower = Some(tower_entity);
     game.selected_offer = None;
     game.upgrade_source = None;
+    game.keep_candidate = None;
     game.message = format!("Selected {} {}.", tower.grade.name(), tower.gem.name());
     clear_selection_menu(commands, menu_items);
     spawn_selection_menu(commands, tower);
+}
+
+/// Picks (but doesn't commit) a starter to keep once all five are placed. The
+/// choice is highlighted and a Confirm button is shown; Ctrl+click skips this.
+fn select_keep_candidate(
+    commands: &mut Commands,
+    game: &mut Game,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+    towers: &Query<(Entity, &mut Tower, &mut Sprite)>,
+    tower_entity: Entity,
+) {
+    let Ok((_, tower, _)) = towers.get(tower_entity) else {
+        return;
+    };
+    let gem = tower.gem;
+
+    game.keep_candidate = Some(tower_entity);
+    game.selected_tower = None;
+    game.selected_offer = None;
+    game.upgrade_source = None;
+    game.message = format!(
+        "Keep the {} starter? Press Confirm (or Ctrl+click a starter to keep instantly).",
+        gem.name()
+    );
+    clear_selection_menu(commands, menu_items);
+    spawn_keep_confirm(commands, gem);
 }
 
 fn inspect_starter_candidate(
@@ -419,6 +498,7 @@ fn keep_starter(
     game.begin_countdown(kept_gem);
     game.selected_tower = Some(kept_entity);
     game.upgrade_source = None;
+    game.keep_candidate = None;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -553,7 +633,9 @@ fn place_tower(
 
     let placed = game.placed_starter_count();
     if game.all_starters_placed() {
-        game.message = "All five starters are placed. Click the one to keep.".to_string();
+        game.message =
+            "All five placed. Click one to select, then Confirm (Ctrl+click to keep instantly)."
+                .to_string();
         let preview_tower = chipped_tower(gem);
         spawn_gem_info(commands, preview_tower.gem);
     } else {
