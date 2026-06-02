@@ -114,6 +114,16 @@ pub struct SelectionMenu;
 #[derive(Component)]
 pub struct UpgradeButton;
 
+/// The label inside the upgrade button, so its color can be dimmed when the
+/// upgrade is unavailable.
+#[derive(Component)]
+pub struct UpgradeButtonText;
+
+/// A transient halo drawn behind a tower that can be sacrificed for the current
+/// upgrade. Rebuilt every frame while an upgrade is in progress.
+#[derive(Component)]
+pub struct UpgradeHighlight;
+
 #[derive(Component, Clone, Copy)]
 pub struct HomeScreen;
 

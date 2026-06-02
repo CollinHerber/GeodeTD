@@ -164,7 +164,8 @@ pub fn handle_tower_action_clicks(
     >,
     mut camera_drag: ResMut<CameraDrag>,
     mut game: ResMut<Game>,
-    towers: Query<&Tower>,
+    towers: Query<(Entity, &Tower)>,
+    starters: Query<&StarterCandidate>,
     menu_items: Query<Entity, With<SelectionMenu>>,
 ) {
     if game.screen != AppScreen::Playing || game.paused {
@@ -174,7 +175,7 @@ pub fn handle_tower_action_clicks(
     for interaction in &interactions {
         if *interaction == Interaction::Pressed {
             camera_drag.suppress_click = true;
-            begin_upgrade_selection(&mut commands, &mut game, &towers, &menu_items);
+            begin_upgrade_selection(&mut commands, &mut game, &towers, &starters, &menu_items);
         }
     }
 }
@@ -211,7 +212,20 @@ pub fn place_or_select(
 
     if let Some(tower_entity) = tower_at_world_position(world_pos, &tower_positions) {
         let is_starter_candidate = starter_candidates.get(tower_entity).is_ok();
-        if game.phase == Phase::Build && game.all_starters_placed() && is_starter_candidate {
+        // Upgrade mode takes precedence (in any phase, so upgrades work mid-wave) so
+        // a click on a matching tower is consumed instead of inspected/kept.
+        if game.upgrade_source.is_some() {
+            complete_upgrade(
+                &mut commands,
+                &mut game,
+                &mut board,
+                &menu_items,
+                &mut towers,
+                &starter_candidates,
+                &gem_images,
+                tower_entity,
+            );
+        } else if game.phase == Phase::Build && game.all_starters_placed() && is_starter_candidate {
             keep_starter(
                 &mut commands,
                 &mut game,
@@ -223,17 +237,6 @@ pub fn place_or_select(
             );
         } else if game.phase == Phase::Build && is_starter_candidate {
             inspect_starter_candidate(&mut commands, &mut game, &menu_items, &towers, tower_entity);
-        } else if game.phase == Phase::Build && game.upgrade_source.is_some() {
-            complete_upgrade(
-                &mut commands,
-                &mut game,
-                &mut board,
-                &path_markers,
-                &menu_items,
-                &mut towers,
-                &gem_images,
-                tower_entity,
-            );
         } else {
             select_tower(&mut commands, &mut game, &menu_items, &towers, tower_entity);
         }
@@ -280,34 +283,60 @@ pub fn place_or_select(
 fn begin_upgrade_selection(
     commands: &mut Commands,
     game: &mut Game,
-    towers: &Query<&Tower>,
+    towers: &Query<(Entity, &Tower)>,
+    starters: &Query<&StarterCandidate>,
     menu_items: &Query<Entity, With<SelectionMenu>>,
 ) {
     let Some(source) = game.selected_tower else {
         return;
     };
-    let Ok(tower) = towers.get(source) else {
+    let Some((gem, grade)) = towers
+        .get(source)
+        .ok()
+        .map(|(_, tower)| (tower.gem, tower.grade))
+    else {
         game.selected_tower = None;
         return;
     };
 
-    if game.phase != Phase::Build {
-        game.message = "Upgrades are available during build rounds.".to_string();
+    if grade.next().is_none() {
+        game.message = "That tower is already Perfect.".to_string();
         return;
     }
 
-    if tower.grade.next().is_none() {
-        game.message = "That tower is already Perfect.".to_string();
+    if !upgrade_match_exists(source, gem, grade, towers, starters) {
+        game.message = format!(
+            "Need another placed {} {} to upgrade.",
+            grade.name(),
+            gem.name()
+        );
         return;
     }
 
     game.upgrade_source = Some(source);
     game.message = format!(
-        "Click another {} {} to sacrifice.",
-        tower.grade.name(),
-        tower.gem.name()
+        "Click a highlighted {} {} to sacrifice.",
+        grade.name(),
+        gem.name()
     );
     clear_selection_menu(commands, menu_items);
+}
+
+/// Whether another placed (non-starter) tower of the same gem and grade exists to
+/// feed an upgrade of `source`.
+fn upgrade_match_exists(
+    source: Entity,
+    gem: crate::gem::GemKind,
+    grade: GemGrade,
+    towers: &Query<(Entity, &Tower)>,
+    starters: &Query<&StarterCandidate>,
+) -> bool {
+    towers.iter().any(|(entity, tower)| {
+        entity != source
+            && starters.get(entity).is_err()
+            && tower.gem == gem
+            && tower.grade == grade
+    })
 }
 
 fn select_tower(
@@ -397,9 +426,9 @@ fn complete_upgrade(
     commands: &mut Commands,
     game: &mut Game,
     board: &mut Board,
-    path_markers: &Query<Entity, With<PathMarker>>,
     menu_items: &Query<Entity, With<SelectionMenu>>,
     towers: &mut Query<(Entity, &mut Tower, &mut Sprite)>,
+    starters: &Query<&StarterCandidate>,
     gem_images: &GemImages,
     sacrifice_entity: Entity,
 ) {
@@ -409,6 +438,11 @@ fn complete_upgrade(
 
     if sacrifice_entity == source_entity {
         game.message = "Pick a different matching tower to sacrifice.".to_string();
+        return;
+    }
+
+    if starters.get(sacrifice_entity).is_ok() {
+        game.message = "Sacrifice a placed tower, not a starter you haven't kept.".to_string();
         return;
     }
 
@@ -442,10 +476,18 @@ fn complete_upgrade(
     source_tower.grade = next_grade;
     source_sprite.image = gem_images.handle(source_tower.gem, next_grade);
     source_sprite.custom_size = Some(tower_sprite_size(next_grade));
-    commands.entity(sacrifice_entity).despawn();
-    board.towers.retain(|_, entity| *entity != sacrifice_entity);
-    board.recalculate_path();
-    refresh_path_markers(commands, path_markers, &board.path);
+
+    // The sacrificed tower turns into a wall. Its cell stays occupied, so the path
+    // is unchanged and in-flight enemies are untouched — which is what makes
+    // upgrading safe in the middle of a wave.
+    if let Some(pos) = grid_pos_for_entity(board, sacrifice_entity) {
+        commands.entity(sacrifice_entity).despawn();
+        board.towers.remove(&pos);
+        board.walls.insert(pos);
+        spawn_starter_wall(commands, pos);
+    } else {
+        commands.entity(sacrifice_entity).despawn();
+    }
     clear_selection_menu(commands, menu_items);
     spawn_selection_menu(commands, &source_tower);
 

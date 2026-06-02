@@ -88,6 +88,9 @@ pub fn find_complete_path(
 
     for segment in targets.windows(2) {
         let segment_path = find_path_between(segment[0], segment[1], blocked)?;
+        // Collapse the grid path into any-angle straight runs so enemies travel at
+        // the true shortest heading instead of staircasing along grid directions.
+        let segment_path = smooth_path(&segment_path, blocked);
         if complete.is_empty() {
             complete.extend(segment_path);
         } else {
@@ -96,6 +99,72 @@ pub fn find_complete_path(
     }
 
     Some(complete)
+}
+
+/// String-pulls a grid path into the fewest waypoints that still avoid obstacles:
+/// a waypoint is kept only when the previous anchor loses line of sight to the
+/// next point. Segment endpoints (start/checkpoint/finish) are always preserved.
+fn smooth_path(path: &[GridPos], blocked: &HashSet<GridPos>) -> Vec<GridPos> {
+    if path.len() <= 2 {
+        return path.to_vec();
+    }
+
+    let mut result = vec![path[0]];
+    let mut anchor = path[0];
+    for index in 1..path.len() - 1 {
+        if !line_of_sight(anchor, path[index + 1], blocked) {
+            result.push(path[index]);
+            anchor = path[index];
+        }
+    }
+    result.push(path[path.len() - 1]);
+    result
+}
+
+/// Whether the straight segment between two cell centers stays entirely on open
+/// ground. Uses a supercover walk so every cell the line touches is checked, and
+/// treats an exact corner crossing like a diagonal move: both flanking cells must
+/// be open (no squeezing through a diagonal gap), matching `moves`.
+fn line_of_sight(a: GridPos, b: GridPos, blocked: &HashSet<GridPos>) -> bool {
+    if blocked.contains(&a) {
+        return false;
+    }
+
+    let mut col = a.col;
+    let mut row = a.row;
+    let steps_x = (b.col - a.col).abs();
+    let steps_y = (b.row - a.row).abs();
+    let sign_x = (b.col - a.col).signum();
+    let sign_y = (b.row - a.row).signum();
+
+    let (mut done_x, mut done_y) = (0, 0);
+    while done_x < steps_x || done_y < steps_y {
+        let compare = (1 + 2 * done_x) * steps_y - (1 + 2 * done_y) * steps_x;
+        if compare == 0 {
+            // The line crosses a grid corner; refuse if either flank is blocked.
+            if blocked.contains(&GridPos::new(col + sign_x, row))
+                || blocked.contains(&GridPos::new(col, row + sign_y))
+            {
+                return false;
+            }
+            col += sign_x;
+            row += sign_y;
+            done_x += 1;
+            done_y += 1;
+        } else if compare < 0 {
+            col += sign_x;
+            done_x += 1;
+        } else {
+            row += sign_y;
+            done_y += 1;
+        }
+
+        if blocked.contains(&GridPos::new(col, row)) {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// A* over an 8-connected grid. Diagonal moves are allowed so enemies can cut

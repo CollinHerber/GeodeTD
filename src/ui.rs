@@ -7,7 +7,8 @@ use crate::components::{
     CheckpointMarker, Enemy, EscapeMenu, EscapeMenuAction, EscapeMenuButton, EscapeMenuInfo,
     GameWorld, HomeScreen, HowToPlayScreen, HudText, MenuAction, MenuButton, ModeSelectScreen,
     OfferButton, OfferLabel, OfferVisual, PathMarker, RoundInfoBody, RoundInfoTitle, SelectionMenu,
-    SettingsScreen, SpeedButton, SpeedText, TopBarText, Tower, UpgradeButton,
+    SettingsScreen, SpeedButton, SpeedText, StarterCandidate, TopBarText, Tower, UpgradeButton,
+    UpgradeButtonText, UpgradeHighlight,
 };
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
 use crate::game::{AppScreen, Game, GameMode, Phase, RoundPlan};
@@ -409,6 +410,7 @@ fn spawn_action_bar(commands: &mut Commands, action: &str) {
                         ..default()
                     },
                     TextColor(Color::srgb(0.96, 0.96, 0.92)),
+                    UpgradeButtonText,
                 ));
             });
         });
@@ -591,6 +593,108 @@ pub fn update_hud(game: Res<Game>, board: Res<Board>, mut hud: Query<&mut Text2d
     );
 }
 
+/// Grays out the "Upgrade to X" button unless the selected tower can actually be
+/// upgraded right now: it's a build round, the gem isn't already Perfect, and a
+/// matching placed (non-starter) duplicate exists to sacrifice.
+pub fn update_upgrade_button(
+    game: Res<Game>,
+    towers: Query<(Entity, &Tower)>,
+    starters: Query<&StarterCandidate>,
+    mut buttons: Query<&mut BackgroundColor, With<UpgradeButton>>,
+    mut labels: Query<&mut TextColor, With<UpgradeButtonText>>,
+) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    let enabled = upgrade_is_available(&game, &towers, &starters);
+
+    for mut color in &mut buttons {
+        color.0 = if enabled {
+            Color::srgb(0.18, 0.23, 0.24)
+        } else {
+            Color::srgb(0.12, 0.13, 0.14)
+        };
+    }
+    for mut color in &mut labels {
+        color.0 = if enabled {
+            Color::srgb(0.96, 0.96, 0.92)
+        } else {
+            Color::srgb(0.46, 0.48, 0.49)
+        };
+    }
+}
+
+fn upgrade_is_available(
+    game: &Game,
+    towers: &Query<(Entity, &Tower)>,
+    starters: &Query<&StarterCandidate>,
+) -> bool {
+    let Some(source) = game.selected_tower else {
+        return false;
+    };
+    let Some((gem, grade)) = towers
+        .get(source)
+        .ok()
+        .map(|(_, tower)| (tower.gem, tower.grade))
+    else {
+        return false;
+    };
+    if grade.next().is_none() {
+        return false;
+    }
+    towers.iter().any(|(entity, tower)| {
+        entity != source
+            && starters.get(entity).is_err()
+            && tower.gem == gem
+            && tower.grade == grade
+    })
+}
+
+/// While an upgrade is in progress, draws a halo behind every tower that can be
+/// sacrificed for it. Rebuilt each frame so it tracks the source's gem/grade.
+pub fn sync_upgrade_highlights(
+    mut commands: Commands,
+    game: Res<Game>,
+    towers: Query<(Entity, &Transform, &Tower, Option<&StarterCandidate>)>,
+    highlights: Query<Entity, With<UpgradeHighlight>>,
+) {
+    if game.screen != AppScreen::Playing {
+        return;
+    }
+
+    for entity in &highlights {
+        commands.entity(entity).despawn();
+    }
+
+    let Some(source) = game.upgrade_source else {
+        return;
+    };
+    let Some((gem, grade)) = towers
+        .get(source)
+        .ok()
+        .map(|(_, _, tower, _)| (tower.gem, tower.grade))
+    else {
+        return;
+    };
+
+    for (entity, transform, tower, starter) in &towers {
+        let eligible =
+            entity != source && starter.is_none() && tower.gem == gem && tower.grade == grade;
+        if eligible {
+            commands.spawn((
+                Sprite::from_color(
+                    Color::srgba(1.0, 0.9, 0.32, 0.45),
+                    Vec2::splat(CELL_SIZE * 0.94),
+                ),
+                Transform::from_translation(transform.translation.truncate().extend(4.5)),
+                UpgradeHighlight,
+                GameWorld,
+            ));
+        }
+    }
+}
+
 pub fn tower_sprite_size(grade: GemGrade) -> Vec2 {
     Vec2::splat(CELL_SIZE * 0.58 * grade.size_multiplier())
 }
@@ -623,13 +727,31 @@ fn spawn_board_tiles(commands: &mut Commands, board: &Board) {
 }
 
 fn spawn_path_markers(commands: &mut Commands, path: &[GridPos]) {
-    for pos in path {
+    if path.is_empty() {
+        return;
+    }
+
+    // The route is now sparse, any-angle waypoints, so lay evenly spaced dots
+    // along each straight run to keep a continuous trail.
+    let spacing = CELL_SIZE * 0.7;
+    let mut points: Vec<Vec2> = Vec::new();
+    for window in path.windows(2) {
+        let start = grid_to_world(window[0]);
+        let end = grid_to_world(window[1]);
+        let steps = ((start.distance(end) / spacing).round() as i32).max(1);
+        for step in 0..steps {
+            points.push(start.lerp(end, step as f32 / steps as f32));
+        }
+    }
+    points.push(grid_to_world(*path.last().unwrap()));
+
+    for point in points {
         commands.spawn((
             Sprite::from_color(
                 Color::srgba(0.88, 0.78, 0.42, 0.28),
-                Vec2::splat(CELL_SIZE * 0.38),
+                Vec2::splat(CELL_SIZE * 0.34),
             ),
-            Transform::from_translation(grid_to_world(*pos).extend(1.0)),
+            Transform::from_translation(point.extend(1.0)),
             PathMarker,
             GameWorld,
         ));

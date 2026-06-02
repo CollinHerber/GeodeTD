@@ -24,8 +24,9 @@ use input::{
     pan_and_zoom_camera, place_or_select, select_offer,
 };
 use ui::{
-    handle_escape_menu_buttons, handle_menu_clicks, setup, toggle_escape_menu, update_hud,
-    update_offer_visuals, update_round_info, update_top_bar,
+    handle_escape_menu_buttons, handle_menu_clicks, setup, sync_upgrade_highlights,
+    toggle_escape_menu, update_hud, update_offer_visuals, update_round_info, update_top_bar,
+    update_upgrade_button,
 };
 use wave::{move_enemies, run_wave, update_wave_countdown};
 
@@ -99,6 +100,8 @@ fn main() {
                 update_hud,
                 update_top_bar,
                 update_round_info,
+                update_upgrade_button,
+                sync_upgrade_highlights,
             )
                 .chain()
                 .in_set(GameSet::Ui),
