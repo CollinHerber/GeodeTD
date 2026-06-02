@@ -145,38 +145,32 @@ pub struct ShowRangeButtonText;
 
 /// Top-bar button that opens/closes the upgrading-chances panel.
 #[derive(Component)]
-#[allow(dead_code)]
 pub struct ChancesButton;
 
 /// Root of the upgrading-chances panel (toggled open/closed).
 #[derive(Component)]
-#[allow(dead_code)]
 pub struct ChancesPanel;
 
 /// A "+10%" buy button for one chance tier (0 → Flawed … 3 → Perfect).
 #[derive(Component)]
-#[allow(dead_code)]
 pub struct ChanceBuyButton {
     pub tier: usize,
 }
 
 /// The label for one tier row, refreshed with its current odds.
 #[derive(Component)]
-#[allow(dead_code)]
 pub struct ChanceRowText {
     pub tier: usize,
 }
 
 /// The label inside a tier's buy button, refreshed with the next cost.
 #[derive(Component)]
-#[allow(dead_code)]
 pub struct ChanceBuyText {
     pub tier: usize,
 }
 
 /// Header line of the chances panel showing current gold / Chipped odds.
 #[derive(Component)]
-#[allow(dead_code)]
 pub struct ChancesHeaderText;
 
 /// The button that commits the player's chosen starter once all five are placed.

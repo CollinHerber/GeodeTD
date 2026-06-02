@@ -1212,8 +1212,9 @@ fn upgrade_is_available(
 }
 
 /// Draws halos behind relevant towers: gold behind every tower that can be
-/// sacrificed for an in-progress upgrade, or green behind the starter the player
-/// has chosen (but not yet confirmed) to keep. Rebuilt each frame.
+/// sacrificed for an in-progress upgrade, green behind the starter the player has
+/// chosen (but not yet confirmed) to keep, or cyan behind the tower whose stats
+/// are currently being inspected. Rebuilt each frame.
 pub fn sync_upgrade_highlights(
     mut commands: Commands,
     game: Res<Game>,
@@ -1264,6 +1265,15 @@ pub fn sync_upgrade_highlights(
             &mut commands,
             transform.translation.truncate(),
             Color::srgba(0.36, 0.92, 0.46, 0.5),
+        );
+    } else if let Some(selected) = game.selected_tower
+        && let Ok((_, transform, _, _)) = towers.get(selected)
+    {
+        // Cyan halo marks which placed tower the stat panel is describing.
+        spawn_halo(
+            &mut commands,
+            transform.translation.truncate(),
+            Color::srgba(0.42, 0.80, 1.0, 0.42),
         );
     }
 }

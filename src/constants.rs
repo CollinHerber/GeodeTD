@@ -9,7 +9,5 @@ pub const WAVE_COUNTDOWN_SECONDS: f32 = 3.0;
 
 /// Gold cost of the first "upgrading chances" purchase; each later one costs
 /// `CHANCE_COST_STEP` more than the previous (escalating tree).
-#[allow(dead_code)]
 pub const CHANCE_BASE_COST: u32 = 10;
-#[allow(dead_code)]
 pub const CHANCE_COST_STEP: u32 = 5;
