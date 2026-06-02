@@ -117,6 +117,11 @@ pub struct OfferVisual {
 }
 
 #[derive(Component)]
+pub struct OfferSelectionGlow {
+    pub index: usize,
+}
+
+#[derive(Component)]
 pub struct OfferLabel {
     pub index: usize,
 }
@@ -154,6 +159,9 @@ pub struct UpgradeHighlight;
 
 #[derive(Component)]
 pub struct AuraRangeSegment;
+
+#[derive(Component)]
+pub struct PlacementPreview;
 
 #[derive(Component, Clone, Copy)]
 pub struct HomeScreen;

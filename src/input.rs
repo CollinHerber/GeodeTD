@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use crate::board::{Board, find_complete_path};
 use crate::components::{
-    GameWorld, OfferButton, PathMarker, SelectionMenu, SpeedButton, StarterCandidate, StarterWall,
-    Tower,
+    GameWorld, OfferButton, PathMarker, PlacementPreview, SelectionMenu, SpeedButton,
+    StarterCandidate, StarterWall, Tower,
 };
 use crate::game::{AppScreen, Game, Phase};
 use crate::gem::GemGrade;
@@ -22,6 +22,7 @@ const MAX_CAMERA_SCALE: f32 = 5.6;
 const ZOOM_STEP: f32 = 0.88;
 const PIXELS_PER_SCROLL_LINE: f32 = 16.0;
 const PAN_DRAG_THRESHOLD: f32 = 4.0;
+const PLACEMENT_PREVIEW_Z: f32 = 6.2;
 
 #[derive(Resource, Default)]
 pub struct CameraDrag {
@@ -256,6 +257,65 @@ pub fn handle_keep_confirm_clicks(
             candidate,
         );
     }
+}
+
+pub fn update_placement_preview(
+    mut commands: Commands,
+    game: Res<Game>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<(&Camera, &GlobalTransform)>,
+    board: Res<Board>,
+    previews: Query<Entity, With<PlacementPreview>>,
+    gem_images: Res<GemImages>,
+) {
+    for entity in previews.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    if game.screen != AppScreen::Playing || game.paused || game.phase != Phase::Build {
+        return;
+    }
+
+    let Some(gem) = game.selected_gem() else {
+        return;
+    };
+
+    let Some(world_pos) = cursor_world_position(&windows, &camera) else {
+        return;
+    };
+    let Some(grid_pos) = world_to_grid(world_pos) else {
+        return;
+    };
+
+    let mut occupied = board.occupied_cells();
+    let valid = !board.protected_cells().contains(&grid_pos) && !occupied.contains(&grid_pos) && {
+        occupied.insert(grid_pos);
+        find_complete_path(&occupied, &board.checkpoints).is_some()
+    };
+
+    let color = if valid {
+        Color::srgba(0.70, 1.0, 0.88, 0.34)
+    } else {
+        Color::srgba(1.0, 0.18, 0.16, 0.32)
+    };
+
+    commands.spawn((
+        Sprite::from_color(color, Vec2::splat(crate::constants::CELL_SIZE * 0.92)),
+        Transform::from_translation(grid_to_world(grid_pos).extend(PLACEMENT_PREVIEW_Z - 0.1)),
+        PlacementPreview,
+        GameWorld,
+    ));
+    commands.spawn((
+        Sprite {
+            image: gem_images.handle(gem, GemGrade::Chipped),
+            custom_size: Some(tower_sprite_size(GemGrade::Chipped) * 0.9),
+            color: Color::srgba(1.0, 1.0, 1.0, if valid { 0.58 } else { 0.32 }),
+            ..default()
+        },
+        Transform::from_translation(grid_to_world(grid_pos).extend(PLACEMENT_PREVIEW_Z)),
+        PlacementPreview,
+        GameWorld,
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]

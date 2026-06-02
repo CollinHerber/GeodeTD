@@ -6,10 +6,10 @@ use crate::board::Board;
 use crate::components::{
     AuraRangeSegment, CheckpointMarker, ConfirmKeepButton, Enemy, EscapeMenu, EscapeMenuAction,
     EscapeMenuButton, EscapeMenuInfo, GameWorld, HomeScreen, HowToPlayScreen, HudText, MenuAction,
-    MenuButton, ModeSelectScreen, OfferButton, OfferLabel, OfferVisual, PathMarker, RoundInfoBody,
-    RoundInfoTitle, SelectionMenu, SettingsScreen, ShowRangeButton, ShowRangeButtonText,
-    SpeedButton, SpeedText, StarterCandidate, TopBarText, Tower, UpgradeButton, UpgradeButtonText,
-    UpgradeHighlight,
+    MenuButton, ModeSelectScreen, OfferButton, OfferLabel, OfferSelectionGlow, OfferVisual,
+    PathMarker, RoundInfoBody, RoundInfoTitle, SelectionMenu, SettingsScreen, ShowRangeButton,
+    ShowRangeButtonText, SpeedButton, SpeedText, StarterCandidate, TopBarText, Tower,
+    UpgradeButton, UpgradeButtonText, UpgradeHighlight,
 };
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
 use crate::game::{AppScreen, Game, GameMode, Phase, RoundPlan};
@@ -585,9 +585,11 @@ pub fn update_round_info(
 
 pub fn update_offer_visuals(
     game: Res<Game>,
+    time: Res<Time>,
     gem_images: Res<GemImages>,
     mut offer_buttons: Query<(&OfferButton, &mut BackgroundColor)>,
     mut offer_sprites: Query<(&OfferVisual, &mut ImageNode, &mut Node)>,
+    mut offer_glows: Query<(&OfferSelectionGlow, &mut BackgroundColor, &mut Node)>,
     mut offer_labels: Query<(&OfferLabel, &mut Text, &mut TextColor)>,
 ) {
     if game.screen != AppScreen::Playing {
@@ -597,7 +599,7 @@ pub fn update_offer_visuals(
     for (offer, mut color) in &mut offer_buttons {
         let selected = game.selected_offer == Some(offer.index) && game.phase == Phase::Build;
         color.0 = if selected {
-            Color::srgb(0.20, 0.28, 0.28)
+            Color::srgb(0.18, 0.32, 0.31)
         } else if game.placed_starters[offer.index].is_some() {
             Color::srgba(0.11, 0.13, 0.13, 0.94)
         } else {
@@ -605,9 +607,24 @@ pub fn update_offer_visuals(
         };
     }
 
+    let pulse = (time.elapsed_secs() * 5.4).sin() * 0.5 + 0.5;
+    for (glow, mut color, mut node) in &mut offer_glows {
+        let selected = game.selected_offer == Some(glow.index) && game.phase == Phase::Build;
+        if selected {
+            let size = 58.0 + pulse * 8.0;
+            node.width = px(size);
+            node.height = px(size);
+            color.0 = Color::srgba(0.50, 0.94, 0.86, 0.18 + pulse * 0.24);
+        } else {
+            node.width = px(0);
+            node.height = px(0);
+            color.0 = Color::NONE;
+        }
+    }
+
     for (offer, mut image, mut node) in &mut offer_sprites {
         let selected = game.selected_offer == Some(offer.index) && game.phase == Phase::Build;
-        let size = if selected { 44.0 } else { 34.0 };
+        let size = if selected { 50.0 } else { 34.0 };
         node.width = px(size);
         node.height = px(size);
 
@@ -1136,6 +1153,16 @@ fn spawn_offer_bar(commands: &mut Commands) {
                     OfferButton { index },
                 ))
                 .with_children(|offer| {
+                    offer.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: px(0),
+                            height: px(0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
+                        OfferSelectionGlow { index },
+                    ));
                     offer.spawn((
                         ImageNode::default(),
                         Node {

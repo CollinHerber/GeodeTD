@@ -24,7 +24,7 @@ use gem_visual::GemImages;
 use input::{
     CameraDrag, handle_keep_confirm_clicks, handle_offer_clicks, handle_show_range_clicks,
     handle_speed_clicks, handle_tower_action_clicks, pan_and_zoom_camera, place_or_select,
-    select_offer,
+    select_offer, update_placement_preview,
 };
 use ui::{
     handle_escape_menu_buttons, handle_menu_clicks, setup, sync_aura_range_rings,
@@ -111,6 +111,7 @@ fn main() {
                 update_show_range_button,
                 sync_upgrade_highlights,
                 sync_aura_range_rings,
+                update_placement_preview,
             )
                 .chain()
                 .in_set(GameSet::Ui),
