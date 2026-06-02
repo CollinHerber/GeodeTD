@@ -136,7 +136,7 @@ impl Game {
             }
             RoundKind::Swift => format!("Wave {} is fast but fragile — hold fast.", self.round),
             RoundKind::Flying => {
-                format!("Wave {} takes to the air and ignores the maze.", self.round)
+                format!("Wave {} takes to the air between checkpoints.", self.round)
             }
             RoundKind::Boss => {
                 format!("Boss wave {}! A single massive foe approaches.", self.round)
@@ -240,7 +240,7 @@ impl RoundKind {
         match self {
             RoundKind::Normal => "A standard column of grounded foes.",
             RoundKind::Swift => "Fast but fragile — they sprint the maze.",
-            RoundKind::Flying => "Ignores the maze and flies straight across.",
+            RoundKind::Flying => "Flies directly between checkpoints, ignoring walls.",
             RoundKind::Boss => "A single massive foe with enormous health.",
         }
     }

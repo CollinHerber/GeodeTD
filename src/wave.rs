@@ -66,28 +66,27 @@ pub fn move_enemies(
     }
 
     let delta = time.delta_secs() * game.speed_multiplier();
-    let flight_target = grid_to_world(finish_pos());
 
     for (entity, mut transform, mut sprite, mut enemy, slowed) in &mut enemies {
-        // Flying enemies bee-line for the finish; grounded enemies that ran out of
-        // path have reached the end. Either way, leaking costs a life.
-        let reached_end = if enemy.flying {
-            false
+        // Flying enemies still visit each checkpoint, but they fly directly
+        // between those numbered points instead of following the maze around
+        // towers and walls.
+        let target = if enemy.flying {
+            flight_target(&board, enemy.next_path_index)
         } else {
-            enemy.next_path_index >= board.path.len()
+            board
+                .path
+                .get(enemy.next_path_index)
+                .map(|pos| grid_to_world(*pos))
         };
-        if reached_end {
+
+        let Some(target) = target else {
             game.lives -= 1;
             commands.entity(entity).despawn();
             continue;
-        }
+        };
 
         let speed = enemy.speed * slowed.map_or(1.0, |slow| slow.factor);
-        let target = if enemy.flying {
-            flight_target
-        } else {
-            grid_to_world(board.path[enemy.next_path_index])
-        };
         let current = transform.translation.truncate();
         let to_target = target - current;
         let step = speed * delta;
@@ -96,18 +95,24 @@ pub fn move_enemies(
         }
 
         if to_target.length() <= step {
-            if enemy.flying {
-                // Flew off the far edge; that's a leak.
-                game.lives -= 1;
-                commands.entity(entity).despawn();
-            } else {
-                transform.translation = target.extend(10.0);
-                enemy.next_path_index += 1;
-            }
+            transform.translation = target.extend(transform.translation.z);
+            enemy.next_path_index += 1;
         } else {
             transform.translation += (to_target.normalize() * step).extend(0.0);
         }
     }
+}
+
+fn flight_target(board: &Board, next_path_index: usize) -> Option<Vec2> {
+    if next_path_index == 0 {
+        return None;
+    }
+
+    if next_path_index <= board.checkpoints.len() {
+        return Some(grid_to_world(board.checkpoints[next_path_index - 1]));
+    }
+
+    (next_path_index == board.checkpoints.len() + 1).then(|| grid_to_world(finish_pos()))
 }
 
 pub fn animate_enemies(
