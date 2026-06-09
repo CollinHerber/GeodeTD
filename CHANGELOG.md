@@ -1,6 +1,11 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+## [0.5.0] - 2026-06-09
+
+### Features
+- Add in grid updates, special towers, better rendering, quit option in menu (1558ff9)
+
 ## [0.4.0] - 2026-06-02
 
 ### Features
