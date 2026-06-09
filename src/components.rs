@@ -1,7 +1,8 @@
 use bevy::prelude::*;
+use std::time::Duration;
 
 use crate::game::RoundKind;
-use crate::gem::{GemGrade, GemKind};
+use crate::gem::{GemEffect, GemGrade, GemKind, SpecialGem, TowerStats, special_recipe_for_source};
 
 #[derive(Component)]
 pub struct PathMarker;
@@ -13,9 +14,120 @@ pub struct CheckpointMarker;
 pub struct Tower {
     pub gem: GemKind,
     pub grade: GemGrade,
+    pub special: Option<SpecialGem>,
     pub damage: f32,
     pub range: f32,
     pub cooldown: Timer,
+    pub black_opal_boosted: bool,
+    pub yellow_sapphire_boosted: bool,
+}
+
+impl Tower {
+    pub fn display_name(&self) -> String {
+        if let Some(special) = self.special {
+            special.name().to_string()
+        } else {
+            format!("{} {}", self.grade.name(), self.gem.name())
+        }
+    }
+
+    pub fn action_label(&self) -> String {
+        if let Some(special) = self.special {
+            return match special.upgrade() {
+                Some(next) => match special.upgrade_cost() {
+                    Some(cost) => format!("Upgrade to {} ({}g)", next.name(), cost),
+                    None => format!("Upgrade to {}", next.name()),
+                },
+                None => "Special complete".to_string(),
+            };
+        }
+
+        if let Some(recipe) = special_recipe_for_source(self.gem, self.grade) {
+            format!("Combine {}", recipe.result.name())
+        } else {
+            match self.grade.next() {
+                Some(next) => format!("Upgrade to {}", next.name()),
+                None => "Perfect grade".to_string(),
+            }
+        }
+    }
+
+    pub fn attack_damage(&self) -> f32 {
+        if self.special.is_some() {
+            self.damage
+        } else {
+            self.damage * self.grade.damage_multiplier()
+        }
+    }
+
+    pub fn effect(&self) -> GemEffect {
+        self.special
+            .map_or_else(|| self.gem.effect(self.grade), SpecialGem::effect)
+    }
+
+    pub fn srgb(&self) -> [f32; 3] {
+        self.special
+            .map_or_else(|| self.gem.srgb(), SpecialGem::srgb)
+    }
+
+    pub fn is_basic(&self, gem: GemKind, grade: GemGrade) -> bool {
+        self.special.is_none() && self.gem == gem && self.grade == grade
+    }
+
+    pub fn can_regular_upgrade(&self) -> bool {
+        self.special.is_none() && self.grade.next().is_some()
+    }
+
+    pub fn range_indicator_radius(&self) -> Option<f32> {
+        match self.effect() {
+            GemEffect::Haste { .. } => Some(self.range),
+            GemEffect::DamageBoost { range, .. } => Some(range),
+            GemEffect::SlowSplashBoost { boost_range, .. } => Some(boost_range),
+            GemEffect::Tourmaline { armor_range, .. } => Some(armor_range),
+            GemEffect::SlowAura { radius, .. } => Some(radius),
+            _ => None,
+        }
+    }
+
+    pub fn become_special(&mut self, special: SpecialGem) {
+        self.special = Some(special);
+        self.gem = match special {
+            SpecialGem::BlackOpal | SpecialGem::MysticBlackOpal => GemKind::Opal,
+            SpecialGem::BloodStone | SpecialGem::AncientBloodStone => GemKind::Ruby,
+            SpecialGem::Gold | SpecialGem::EgyptianGold => GemKind::Amethyst,
+            SpecialGem::Jade | SpecialGem::AsianJade | SpecialGem::LuckyAsianJade => {
+                GemKind::Emerald
+            }
+            SpecialGem::Malachite | SpecialGem::VividMalachite | SpecialGem::MightyMalachite => {
+                GemKind::Opal
+            }
+            SpecialGem::PinkDiamond | SpecialGem::GreatPinkDiamond => GemKind::Diamond,
+            SpecialGem::RedCrystal
+            | SpecialGem::RedCrystalFacet
+            | SpecialGem::RoseQuartzCrystal => GemKind::Emerald,
+            SpecialGem::Silver | SpecialGem::SterlingSilver | SpecialGem::SilverKnight => {
+                GemKind::Sapphire
+            }
+            SpecialGem::StarRuby | SpecialGem::BloodStar | SpecialGem::FireStar => {
+                GemKind::Amethyst
+            }
+            SpecialGem::Tourmaline | SpecialGem::ParaibaTourmaline => GemKind::Aquamarine,
+            SpecialGem::Uranium238 | SpecialGem::Uranium235 => GemKind::Topaz,
+            SpecialGem::YellowSapphire | SpecialGem::StarYellowSapphire => GemKind::Sapphire,
+        };
+        self.grade = special.sprite_grade();
+        self.black_opal_boosted = false;
+        self.yellow_sapphire_boosted = false;
+        self.apply_stats(special.stats());
+    }
+
+    fn apply_stats(&mut self, stats: TowerStats) {
+        self.damage = stats.damage;
+        self.range = stats.range;
+        self.cooldown = Timer::from_seconds(stats.cooldown, TimerMode::Once);
+        self.cooldown
+            .set_elapsed(Duration::from_secs_f32(stats.cooldown));
+    }
 }
 
 #[derive(Component)]
@@ -49,12 +161,41 @@ pub struct Slowed {
     pub timer: Timer,
 }
 
+#[derive(Component)]
+pub struct Stunned {
+    pub timer: Timer,
+}
+
 /// Stacking damage-over-time applied by Emerald towers.
 #[derive(Component)]
 pub struct Poison {
     pub stacks: u32,
     pub dps_per_stack: f32,
     pub duration: Timer,
+}
+
+#[derive(Component)]
+pub struct Burning {
+    pub dps: f32,
+    pub duration: Timer,
+}
+
+#[derive(Component)]
+pub struct ArmorBroken {
+    pub reduction: f32,
+    pub duration: Timer,
+}
+
+impl ArmorBroken {
+    pub fn damage_multiplier(&self) -> f32 {
+        armor_reduction_damage_multiplier(self.reduction)
+    }
+}
+
+pub fn armor_reduction_damage_multiplier(reduction: f32) -> f32 {
+    // The original game has a Warcraft-style armor table. This prototype
+    // approximates the wiki note that -14 armor roughly doubles damage.
+    1.0 + reduction / 14.0
 }
 
 #[derive(Component)]
@@ -273,5 +414,6 @@ pub enum MenuAction {
     HowToPlay,
     Settings,
     TogglePathOverlay,
+    Quit,
     Home,
 }

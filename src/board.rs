@@ -20,6 +20,8 @@ pub const CHECKPOINT_COUNT: usize = 4;
 pub struct Board {
     pub towers: HashMap<GridPos, Entity>,
     pub walls: HashSet<GridPos>,
+    pub start: GridPos,
+    pub finish: GridPos,
     pub path: Vec<GridPos>,
     pub checkpoints: Vec<GridPos>,
 }
@@ -35,16 +37,19 @@ impl Board {
             .map(|time| time.as_nanos() as u64)
             .unwrap_or(0xB0A4D);
         let mut rng = OfferRng::new(seed);
-        let checkpoints = match mode {
-            GameMode::Standard => standard_checkpoints(),
-            GameMode::Random => random_checkpoints(&mut rng),
+        let (start, checkpoints) = match mode {
+            GameMode::Standard => (standard_start_pos(), standard_checkpoints()),
+            GameMode::Random => (start_pos(), random_checkpoints(&mut rng)),
         };
-        let path = find_complete_path(&HashSet::new(), &checkpoints)
+        let finish = finish_pos();
+        let path = find_complete_path(start, finish, &HashSet::new(), &checkpoints)
             .expect("empty board should always have a checkpoint path");
 
         Self {
             towers: HashMap::new(),
             walls: HashSet::new(),
+            start,
+            finish,
             path,
             checkpoints,
         }
@@ -55,17 +60,24 @@ impl Board {
     }
 
     pub fn reset_for_shared_layout(&mut self, layout: &SharedBoardLayout) {
+        let start = match &layout.mode {
+            geode_td_shared::GameMode::Standard => standard_start_pos(),
+            geode_td_shared::GameMode::Random => start_pos(),
+        };
+        let finish = finish_pos();
         let checkpoints = layout
             .checkpoints
             .iter()
             .map(|point| GridPos::new(point.col, point.row))
             .collect::<Vec<_>>();
-        let path = find_complete_path(&HashSet::new(), &checkpoints)
+        let path = find_complete_path(start, finish, &HashSet::new(), &checkpoints)
             .expect("server layout should always have an empty-board path");
 
         *self = Self {
             towers: HashMap::new(),
             walls: HashSet::new(),
+            start,
+            finish,
             path,
             checkpoints,
         };
@@ -78,13 +90,17 @@ impl Board {
     }
 
     pub fn protected_cells(&self) -> HashSet<GridPos> {
-        let mut protected = HashSet::from([start_pos(), finish_pos()]);
+        let mut protected = HashSet::from([self.start, self.finish]);
         protected.extend(self.checkpoints.iter().copied());
         protected
     }
 
+    pub fn path_with_blocked(&self, blocked: &HashSet<GridPos>) -> Option<Vec<GridPos>> {
+        find_complete_path(self.start, self.finish, blocked, &self.checkpoints)
+    }
+
     pub fn recalculate_path(&mut self) -> bool {
-        if let Some(path) = find_complete_path(&self.occupied_cells(), &self.checkpoints) {
+        if let Some(path) = self.path_with_blocked(&self.occupied_cells()) {
             self.path = path;
             true
         } else {
@@ -94,13 +110,15 @@ impl Board {
 }
 
 pub fn find_complete_path(
+    start: GridPos,
+    finish: GridPos,
     blocked: &HashSet<GridPos>,
     checkpoints: &[GridPos],
 ) -> Option<Vec<GridPos>> {
     let mut targets = Vec::with_capacity(checkpoints.len() + 2);
-    targets.push(start_pos());
+    targets.push(start);
     targets.extend_from_slice(checkpoints);
-    targets.push(finish_pos());
+    targets.push(finish);
 
     let mut complete = Vec::new();
 
@@ -285,12 +303,14 @@ fn random_checkpoints(rng: &mut OfferRng) -> Vec<GridPos> {
 
 fn standard_checkpoints() -> Vec<GridPos> {
     let center = scaled_grid_pos(BASE_GRID_COLUMNS / 2, BASE_GRID_ROWS / 2);
+    let lower_left = scaled_grid_pos(6, 3);
+    let lower_right = scaled_grid_pos(22, 3);
+    let upper_left = scaled_grid_pos(6, 13);
+    let upper_right = scaled_grid_pos(22, 13);
 
-    vec![
-        center,
-        scaled_grid_pos(6, 3),
-        scaled_grid_pos(22, 13),
-        scaled_grid_pos(6, 13),
-        scaled_grid_pos(22, 3),
-    ]
+    vec![upper_left, lower_left, lower_right, upper_right, center]
+}
+
+fn standard_start_pos() -> GridPos {
+    scaled_grid_pos(1, 13)
 }

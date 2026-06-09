@@ -3,13 +3,15 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use std::time::Duration;
 
-use crate::board::{Board, find_complete_path};
+use crate::board::Board;
 use crate::components::{
     ChanceBuyButton, ChancesButton, ChancesPanel, GameWorld, OfferButton, PathMarker,
     PlacementPreview, SelectionMenu, SpeedButton, StarterCandidate, StarterWall, Tower,
 };
 use crate::game::{AppScreen, Game, Phase, tier_grade};
-use crate::gem::GemGrade;
+use crate::gem::{
+    GemEffect, GemGrade, GemKind, SpecialGem, SpecialRecipe, special_recipe_for_source,
+};
 use crate::gem_visual::GemImages;
 use crate::grid::{grid_to_world, world_to_grid};
 use crate::ui::{
@@ -159,6 +161,7 @@ pub fn handle_speed_clicks(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_tower_action_clicks(
     mut commands: Commands,
     interactions: Query<
@@ -167,9 +170,11 @@ pub fn handle_tower_action_clicks(
     >,
     mut camera_drag: ResMut<CameraDrag>,
     mut game: ResMut<Game>,
-    towers: Query<(Entity, &Tower)>,
+    mut board: ResMut<Board>,
+    mut towers: Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
     starters: Query<&StarterCandidate>,
     menu_items: Query<Entity, With<SelectionMenu>>,
+    gem_images: Res<GemImages>,
 ) {
     if game.screen != AppScreen::Playing || game.paused {
         return;
@@ -178,7 +183,15 @@ pub fn handle_tower_action_clicks(
     for interaction in &interactions {
         if *interaction == Interaction::Pressed {
             camera_drag.suppress_click = true;
-            begin_upgrade_selection(&mut commands, &mut game, &towers, &starters, &menu_items);
+            handle_selected_tower_action(
+                &mut commands,
+                &mut game,
+                &mut board,
+                &mut towers,
+                &starters,
+                &menu_items,
+                &gem_images,
+            );
         }
     }
 }
@@ -211,10 +224,7 @@ pub fn handle_show_range_clicks(
         let Ok(tower) = towers.get(tower_entity) else {
             continue;
         };
-        if matches!(
-            tower.gem.effect(tower.grade),
-            crate::gem::GemEffect::Haste { .. }
-        ) {
+        if tower.range_indicator_radius().is_some() {
             game.toggle_aura_range(tower_entity);
         }
     }
@@ -356,7 +366,7 @@ pub fn update_placement_preview(
     let mut occupied = board.occupied_cells();
     let valid = !board.protected_cells().contains(&grid_pos) && !occupied.contains(&grid_pos) && {
         occupied.insert(grid_pos);
-        find_complete_path(&occupied, &board.checkpoints).is_some()
+        board.path_with_blocked(&occupied).is_some()
     };
 
     let color = if valid {
@@ -494,29 +504,94 @@ pub fn place_or_select(
     );
 }
 
+enum SelectedTowerAction {
+    RegularUpgrade,
+    CombineSpecial(SpecialRecipe),
+    UpgradeSpecial(SpecialGem),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_selected_tower_action(
+    commands: &mut Commands,
+    game: &mut Game,
+    board: &mut Board,
+    towers: &mut Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
+    starters: &Query<&StarterCandidate>,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+    gem_images: &GemImages,
+) {
+    let Some(source) = game.selected_tower else {
+        return;
+    };
+
+    let Some(action) = selected_tower_action(source, game, towers) else {
+        return;
+    };
+
+    match action {
+        SelectedTowerAction::RegularUpgrade => {
+            begin_upgrade_selection(commands, game, towers, starters, menu_items);
+        }
+        SelectedTowerAction::CombineSpecial(recipe) => {
+            combine_special(
+                commands, game, board, towers, starters, menu_items, gem_images, source, recipe,
+            );
+        }
+        SelectedTowerAction::UpgradeSpecial(special) => {
+            upgrade_special(
+                commands, game, towers, menu_items, gem_images, source, special,
+            );
+        }
+    }
+}
+
+fn selected_tower_action(
+    source: Entity,
+    game: &mut Game,
+    towers: &mut Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
+) -> Option<SelectedTowerAction> {
+    let Ok((_, _, tower, _)) = towers.get_mut(source) else {
+        game.selected_tower = None;
+        return None;
+    };
+
+    if let Some(special) = tower.special
+        && special.upgrade().is_some()
+    {
+        Some(SelectedTowerAction::UpgradeSpecial(special))
+    } else if let Some(recipe) = special_recipe_for_source(tower.gem, tower.grade) {
+        Some(SelectedTowerAction::CombineSpecial(recipe))
+    } else {
+        Some(SelectedTowerAction::RegularUpgrade)
+    }
+}
+
 fn begin_upgrade_selection(
     commands: &mut Commands,
     game: &mut Game,
-    towers: &Query<(Entity, &Tower)>,
+    towers: &mut Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
     starters: &Query<&StarterCandidate>,
     menu_items: &Query<Entity, With<SelectionMenu>>,
 ) {
     let Some(source) = game.selected_tower else {
         return;
     };
-    let Some((gem, grade)) = towers
-        .get(source)
-        .ok()
-        .map(|(_, tower)| (tower.gem, tower.grade))
-    else {
-        game.selected_tower = None;
+
+    let Some((gem, grade)) = ({
+        let Ok((_, _, tower, _)) = towers.get_mut(source) else {
+            game.selected_tower = None;
+            return;
+        };
+
+        if !tower.can_regular_upgrade() {
+            game.message = "That tower cannot be upgraded with a duplicate.".to_string();
+            return;
+        }
+
+        Some((tower.gem, tower.grade))
+    }) else {
         return;
     };
-
-    if grade.next().is_none() {
-        game.message = "That tower is already Perfect.".to_string();
-        return;
-    }
 
     if !upgrade_match_exists(source, gem, grade, towers, starters) {
         game.message = format!(
@@ -540,17 +615,197 @@ fn begin_upgrade_selection(
 /// feed an upgrade of `source`.
 fn upgrade_match_exists(
     source: Entity,
-    gem: crate::gem::GemKind,
+    gem: GemKind,
     grade: GemGrade,
-    towers: &Query<(Entity, &Tower)>,
+    towers: &mut Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
     starters: &Query<&StarterCandidate>,
 ) -> bool {
-    towers.iter().any(|(entity, tower)| {
-        entity != source
-            && starters.get(entity).is_err()
-            && tower.gem == gem
-            && tower.grade == grade
+    towers.iter_mut().any(|(entity, _, tower, _)| {
+        entity != source && starters.get(entity).is_err() && tower.is_basic(gem, grade)
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn combine_special(
+    commands: &mut Commands,
+    game: &mut Game,
+    board: &mut Board,
+    towers: &mut Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
+    starters: &Query<&StarterCandidate>,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+    gem_images: &GemImages,
+    source: Entity,
+    recipe: SpecialRecipe,
+) {
+    let Some(components) = special_component_entities(source, recipe, towers, starters) else {
+        game.message = format!(
+            "{} needs {}.",
+            recipe.result.name(),
+            recipe.ingredient_summary()
+        );
+        game.upgrade_source = None;
+        return;
+    };
+
+    {
+        let Ok((_, _, mut source_tower, mut source_sprite)) = towers.get_mut(source) else {
+            game.message = format!(
+                "{} recipe source is no longer available.",
+                recipe.result.name()
+            );
+            return;
+        };
+
+        source_tower.become_special(recipe.result);
+        source_sprite.image = gem_images.special_handle(recipe.result);
+        source_sprite.custom_size = Some(tower_sprite_size(recipe.result.sprite_grade()));
+    }
+
+    for component in components {
+        sacrifice_tower_to_wall(commands, game, board, component);
+    }
+
+    clear_selection_menu(commands, menu_items);
+    if let Ok((_, _, source_tower, _)) = towers.get_mut(source) {
+        spawn_selection_menu(commands, &source_tower);
+    }
+    game.selected_tower = Some(source);
+    game.selected_offer = None;
+    game.upgrade_source = None;
+    game.message = format!(
+        "Combined {} into {}.",
+        recipe.ingredient_summary(),
+        recipe.result.name()
+    );
+}
+
+fn special_component_entities(
+    source: Entity,
+    recipe: SpecialRecipe,
+    towers: &mut Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
+    starters: &Query<&StarterCandidate>,
+) -> Option<Vec<Entity>> {
+    let mut found = vec![None; recipe.components.len()];
+
+    for (entity, _, tower, _) in towers.iter_mut() {
+        if entity == source || starters.get(entity).is_ok() {
+            continue;
+        }
+
+        for (index, (gem, grade)) in recipe.components.iter().enumerate() {
+            if found[index].is_none() && tower.is_basic(*gem, *grade) {
+                found[index] = Some(entity);
+                break;
+            }
+        }
+    }
+
+    found.into_iter().collect()
+}
+
+fn upgrade_special(
+    commands: &mut Commands,
+    game: &mut Game,
+    towers: &mut Query<(Entity, &Transform, &mut Tower, &mut Sprite)>,
+    menu_items: &Query<Entity, With<SelectionMenu>>,
+    gem_images: &GemImages,
+    source: Entity,
+    special: SpecialGem,
+) {
+    let Some(next) = special.upgrade() else {
+        game.message = format!("{} has no further upgrade.", special.name());
+        return;
+    };
+    let Some(cost) = special.upgrade_cost() else {
+        game.message = format!("{} has no upgrade cost configured.", special.name());
+        return;
+    };
+    if game.coins < cost {
+        game.message = format!("Need {} gold to upgrade {}.", cost, special.name());
+        return;
+    }
+
+    let source_position = {
+        let Ok((_, transform, mut tower, mut sprite)) = towers.get_mut(source) else {
+            game.selected_tower = None;
+            return;
+        };
+        if tower.special != Some(special) {
+            game.message = format!("Only {} can upgrade to {}.", special.name(), next.name());
+            return;
+        }
+
+        game.coins -= cost;
+        let source_position = transform.translation.truncate();
+        tower.become_special(next);
+        sprite.image = gem_images.special_handle(next);
+        sprite.custom_size = Some(tower_sprite_size(next.sprite_grade()));
+        source_position
+    };
+
+    let mut boosted = 0;
+    if let Some((damage_bonus, boost_radius)) = special_damage_boost(next.effect()) {
+        for (entity, transform, mut other_tower, _) in towers.iter_mut() {
+            if entity == source || other_tower.black_opal_boosted {
+                continue;
+            }
+            if other_tower.effect().ignores_opal_effects() {
+                continue;
+            }
+            if transform.translation.truncate().distance(source_position) <= boost_radius {
+                if other_tower.yellow_sapphire_boosted {
+                    if next != SpecialGem::MysticBlackOpal {
+                        continue;
+                    }
+                    other_tower.damage /= 1.0 + SpecialGem::STAR_YELLOW_SAPPHIRE_DAMAGE_BOOST;
+                    other_tower.yellow_sapphire_boosted = false;
+                }
+                other_tower.damage *= 1.0 + damage_bonus;
+                if next == SpecialGem::MysticBlackOpal {
+                    other_tower.black_opal_boosted = true;
+                } else if next == SpecialGem::StarYellowSapphire {
+                    other_tower.yellow_sapphire_boosted = true;
+                }
+                boosted += 1;
+            }
+        }
+    }
+
+    clear_selection_menu(commands, menu_items);
+    if let Ok((_, _, tower, _)) = towers.get_mut(source) {
+        spawn_selection_menu(commands, &tower);
+    }
+    game.selected_tower = Some(source);
+    game.selected_offer = None;
+    game.upgrade_source = None;
+    game.message = match next {
+        SpecialGem::MysticBlackOpal => format!(
+            "Upgraded to Mystic Black Opal. Boosted {} existing tower{} by 40%.",
+            boosted,
+            if boosted == 1 { "" } else { "s" }
+        ),
+        SpecialGem::StarYellowSapphire => format!(
+            "Upgraded to Star Yellow Sapphire. Boosted {} existing tower{} by 5%.",
+            boosted,
+            if boosted == 1 { "" } else { "s" }
+        ),
+        _ => format!("Upgraded to {}.", next.name()),
+    };
+}
+
+fn special_damage_boost(effect: GemEffect) -> Option<(f32, f32)> {
+    match effect {
+        GemEffect::DamageBoost {
+            damage_bonus,
+            range,
+        } => Some((damage_bonus, range)),
+        GemEffect::SlowSplashBoost {
+            damage_bonus,
+            boost_range,
+            ..
+        } => Some((damage_bonus, boost_range)),
+        _ => None,
+    }
 }
 
 fn select_tower(
@@ -568,7 +823,7 @@ fn select_tower(
     game.selected_offer = None;
     game.upgrade_source = None;
     game.keep_candidate = None;
-    game.message = format!("Selected {} {}.", tower.grade.name(), tower.gem.name());
+    game.message = format!("Selected {}.", tower.display_name());
     clear_selection_menu(commands, menu_items);
     spawn_selection_menu(commands, tower);
 }
@@ -702,7 +957,7 @@ fn complete_upgrade(
         return;
     };
 
-    if source_tower.gem != sacrifice_tower.gem || source_tower.grade != sacrifice_tower.grade {
+    if !sacrifice_tower.is_basic(source_tower.gem, source_tower.grade) {
         game.message = format!(
             "Upgrade needs another {} {}.",
             source_tower.grade.name(),
@@ -724,16 +979,7 @@ fn complete_upgrade(
     // The sacrificed tower turns into a wall. Its cell stays occupied, so the path
     // is unchanged and in-flight enemies are untouched — which is what makes
     // upgrading safe in the middle of a wave.
-    if let Some(pos) = grid_pos_for_entity(board, sacrifice_entity) {
-        commands.entity(sacrifice_entity).despawn();
-        board.towers.remove(&pos);
-        game.shown_aura_ranges.remove(&sacrifice_entity);
-        board.walls.insert(pos);
-        spawn_starter_wall(commands, pos);
-    } else {
-        commands.entity(sacrifice_entity).despawn();
-        game.shown_aura_ranges.remove(&sacrifice_entity);
-    }
+    sacrifice_tower_to_wall(commands, game, board, sacrifice_entity);
     clear_selection_menu(commands, menu_items);
     spawn_selection_menu(commands, &source_tower);
 
@@ -745,6 +991,24 @@ fn complete_upgrade(
         source_tower.grade.name(),
         source_tower.gem.name()
     );
+}
+
+fn sacrifice_tower_to_wall(
+    commands: &mut Commands,
+    game: &mut Game,
+    board: &mut Board,
+    tower_entity: Entity,
+) {
+    if let Some(pos) = grid_pos_for_entity(board, tower_entity) {
+        commands.entity(tower_entity).despawn();
+        board.towers.remove(&pos);
+        game.shown_aura_ranges.remove(&tower_entity);
+        board.walls.insert(pos);
+        spawn_starter_wall(commands, pos);
+    } else {
+        commands.entity(tower_entity).despawn();
+        game.shown_aura_ranges.remove(&tower_entity);
+    }
 }
 
 fn place_tower(
@@ -782,7 +1046,7 @@ fn place_tower(
     let mut occupied = board.occupied_cells();
     occupied.insert(grid_pos);
 
-    let Some(new_path) = find_complete_path(&occupied, &board.checkpoints) else {
+    let Some(new_path) = board.path_with_blocked(&occupied) else {
         game.message = "That placement would block the checkpoint route.".to_string();
         return;
     };
@@ -875,9 +1139,12 @@ fn tower_for_grade(gem: crate::gem::GemKind, grade: GemGrade) -> Tower {
     Tower {
         gem,
         grade,
+        special: None,
         damage: stats.damage,
         range: stats.range,
         cooldown,
+        black_opal_boosted: false,
+        yellow_sapphire_boosted: false,
     }
 }
 

@@ -16,10 +16,12 @@ cargo fmt            # format before committing
 ```
 
 - **Toolchain is pinned and non-standard.** `rust-toolchain.toml` selects
-  `stable-x86_64-pc-windows-gnu`. `.cargo/config.toml` points the linker at a local
-  w64devkit GCC at `C:\dev\bevy\.toolchains\w64devkit` and uses `lld`. If a build
-  fails with linker/`gcc not found` errors, that toolchain directory is the cause —
-  don't "fix" it by switching to MSVC.
+  `stable` and installs the `x86_64-pc-windows-gnu` target. `.cargo/config.toml`
+  builds that target by default and points the linker at a local w64devkit GCC at
+  `C:\dev\bevy\.toolchains\w64devkit`. If a build fails with linker/`gcc not found`
+  errors, that toolchain directory is the cause — don't "fix" it by switching to
+  MSVC. Some w64devkit releases omit `libgcc_eh.a`; on those installs, copy
+  `libgcc.a` to `libgcc_eh.a` in the same GCC library version directory.
 - Rust **edition 2024**. Single dependency: `bevy = "0.18"`.
 - Platform is Windows; the shell is PowerShell. Use PowerShell syntax in commands.
 

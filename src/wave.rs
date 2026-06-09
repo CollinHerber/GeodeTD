@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 
 use crate::board::Board;
-use crate::components::{Enemy, EnemyAnimation, GameWorld, Slowed};
+use crate::components::{Enemy, EnemyAnimation, GameWorld, Slowed, Stunned};
 use crate::enemy_art::EnemyArt;
 use crate::game::{AppScreen, Game, Phase, RoundKind, RoundPlan};
-use crate::grid::{finish_pos, grid_to_world};
+use crate::grid::grid_to_world;
 
 pub fn update_wave_countdown(time: Res<Time>, mut game: ResMut<Game>) {
     if game.screen != AppScreen::Playing || game.paused || game.phase != Phase::Countdown {
@@ -48,6 +48,7 @@ pub fn run_wave(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn move_enemies(
     mut commands: Commands,
     time: Res<Time>,
@@ -59,6 +60,7 @@ pub fn move_enemies(
         &mut Sprite,
         &mut Enemy,
         Option<&Slowed>,
+        Option<&Stunned>,
     )>,
 ) {
     if game.screen != AppScreen::Playing || game.paused {
@@ -67,7 +69,7 @@ pub fn move_enemies(
 
     let delta = time.delta_secs() * game.speed_multiplier();
 
-    for (entity, mut transform, mut sprite, mut enemy, slowed) in &mut enemies {
+    for (entity, mut transform, mut sprite, mut enemy, slowed, stunned) in &mut enemies {
         // Flying enemies still visit each checkpoint, but they fly directly
         // between those numbered points instead of following the maze around
         // towers and walls.
@@ -86,7 +88,11 @@ pub fn move_enemies(
             continue;
         };
 
-        let speed = enemy.speed * slowed.map_or(1.0, |slow| slow.factor);
+        let speed = if stunned.is_some() {
+            0.0
+        } else {
+            enemy.speed * slowed.map_or(1.0, |slow| slow.factor)
+        };
         let current = transform.translation.truncate();
         let to_target = target - current;
         let step = speed * delta;
@@ -112,7 +118,7 @@ fn flight_target(board: &Board, next_path_index: usize) -> Option<Vec2> {
         return Some(grid_to_world(board.checkpoints[next_path_index - 1]));
     }
 
-    (next_path_index == board.checkpoints.len() + 1).then(|| grid_to_world(finish_pos()))
+    (next_path_index == board.checkpoints.len() + 1).then(|| grid_to_world(board.finish))
 }
 
 pub fn animate_enemies(

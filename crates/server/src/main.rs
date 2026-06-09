@@ -529,14 +529,12 @@ fn shared_layout(mode: GameMode) -> SharedBoardLayout {
 
 fn standard_checkpoints() -> Vec<GridPoint> {
     let center = scaled_grid_point(BASE_GRID_COLUMNS / 2, BASE_GRID_ROWS / 2);
+    let lower_left = scaled_grid_point(6, 3);
+    let lower_right = scaled_grid_point(22, 3);
+    let upper_left = scaled_grid_point(6, 13);
+    let upper_right = scaled_grid_point(22, 13);
 
-    vec![
-        center,
-        scaled_grid_point(6, 3),
-        scaled_grid_point(22, 13),
-        scaled_grid_point(6, 13),
-        scaled_grid_point(22, 3),
-    ]
+    vec![upper_left, lower_left, lower_right, upper_right, center]
 }
 
 fn random_checkpoints(seed: u64) -> Vec<GridPoint> {

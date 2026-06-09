@@ -1,3 +1,4 @@
+use bevy::app::AppExit;
 use bevy::ecs::query::QueryFilter;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
@@ -20,9 +21,11 @@ use crate::components::{
 };
 use crate::constants::{CELL_SIZE, OFFER_COUNT};
 use crate::game::{AppScreen, Game, GameMode, Phase, RoundPlan, UpgradeChances, tier_grade};
-use crate::gem::{GRADE_LADDER, GemEffect, GemGrade, GemKind};
+use crate::gem::{
+    GRADE_LADDER, GemEffect, GemGrade, GemKind, SpecialRecipe, special_recipe_for_source,
+};
 use crate::gem_visual::GemImages;
-use crate::grid::{GridPos, finish_pos, grid_to_world, start_pos};
+use crate::grid::{GridPos, grid_to_world};
 use crate::multiplayer::{MultiplayerClient, NameIntent};
 
 #[derive(Resource, Default)]
@@ -58,6 +61,7 @@ pub fn handle_menu_clicks(
     mut game: ResMut<Game>,
     mut board: ResMut<Board>,
     mut multiplayer: ResMut<MultiplayerClient>,
+    mut app_exit: MessageWriter<AppExit>,
     buttons_query: Query<&MenuButton>,
     lobby_buttons: Query<&LobbyRowButton>,
     menu_entities: Query<Entity, MenuScreenFilter>,
@@ -207,6 +211,9 @@ pub fn handle_menu_clicks(
             spawn_settings_screen(&mut commands, game.show_path_overlay);
             game.paused = false;
             game.screen = AppScreen::Settings;
+        }
+        MenuAction::Quit => {
+            app_exit.write(AppExit::Success);
         }
         MenuAction::Home => {
             multiplayer.leave_lobby();
@@ -582,25 +589,18 @@ pub fn clear_selection_menu(
 }
 
 pub fn spawn_selection_menu(commands: &mut Commands, tower: &Tower) {
-    let title = format!("{} {}", tower.grade.name(), tower.gem.name());
-    let action = match tower.grade.next() {
-        Some(next) => format!("Upgrade to {}", next.name()),
-        None => "Perfect grade".to_string(),
-    };
-
-    let damage = tower.damage * tower.grade.damage_multiplier();
     let stats = stats_text(
-        damage,
+        tower.attack_damage(),
         tower.range,
         tower.cooldown.duration().as_secs_f32(),
-        tower.gem.effect(tower.grade),
+        tower.effect(),
     );
 
-    spawn_info_panel(commands, &title, &stats);
+    spawn_info_panel(commands, &tower.display_name(), &stats);
     spawn_action_bar(
         commands,
-        &action,
-        matches!(tower.gem.effect(tower.grade), GemEffect::Haste { .. }),
+        &tower.action_label(),
+        tower.range_indicator_radius().is_some(),
     );
 }
 
@@ -782,12 +782,20 @@ fn spawn_action_bar(commands: &mut Commands, action: &str, show_range_button: bo
 fn stats_text(damage: f32, range: f32, cooldown: f32, effect: GemEffect) -> String {
     let fire_rate = if cooldown > 0.0 { 1.0 / cooldown } else { 0.0 };
     format!(
-        "Damage: {:.0}\nRange: {:.0}\nFire rate: {:.2}/s\n{}",
-        damage,
+        "Damage: {}\nRange: {:.0}\nFire rate: {:.2}/s\n{}",
+        damage_text(damage),
         range,
         fire_rate,
         effect.describe()
     )
+}
+
+fn damage_text(damage: f32) -> String {
+    if (damage - damage.round()).abs() < 0.05 {
+        format!("{damage:.0}")
+    } else {
+        format!("{damage:.1}")
+    }
 }
 
 pub fn update_top_bar(
@@ -1193,21 +1201,42 @@ fn upgrade_is_available(
     let Some(source) = game.selected_tower else {
         return false;
     };
-    let Some((gem, grade)) = towers
-        .get(source)
-        .ok()
-        .map(|(_, tower)| (tower.gem, tower.grade))
-    else {
+    let Ok((_, source_tower)) = towers.get(source) else {
         return false;
     };
-    if grade.next().is_none() {
+
+    if let Some(special) = source_tower.special
+        && special.upgrade().is_some()
+    {
+        return special
+            .upgrade_cost()
+            .is_some_and(|cost| game.coins >= cost);
+    }
+
+    if let Some(recipe) = special_recipe_for_source(source_tower.gem, source_tower.grade) {
+        return special_recipe_is_available(source, recipe, towers, starters);
+    }
+
+    if !source_tower.can_regular_upgrade() {
         return false;
     }
     towers.iter().any(|(entity, tower)| {
         entity != source
             && starters.get(entity).is_err()
-            && tower.gem == gem
-            && tower.grade == grade
+            && tower.is_basic(source_tower.gem, source_tower.grade)
+    })
+}
+
+fn special_recipe_is_available(
+    source: Entity,
+    recipe: SpecialRecipe,
+    towers: &Query<(Entity, &Tower)>,
+    starters: &Query<&StarterCandidate>,
+) -> bool {
+    recipe.components.iter().all(|(gem, grade)| {
+        towers.iter().any(|(entity, tower)| {
+            entity != source && starters.get(entity).is_err() && tower.is_basic(*gem, *grade)
+        })
     })
 }
 
@@ -1239,17 +1268,14 @@ pub fn sync_upgrade_highlights(
     };
 
     if let Some(source) = game.upgrade_source {
-        let Some((gem, grade)) = towers
-            .get(source)
-            .ok()
-            .map(|(_, _, tower, _)| (tower.gem, tower.grade))
-        else {
+        let Ok((_, _, source_tower, _)) = towers.get(source) else {
             return;
         };
 
         for (entity, transform, tower, starter) in &towers {
-            let eligible =
-                entity != source && starter.is_none() && tower.gem == gem && tower.grade == grade;
+            let eligible = entity != source
+                && starter.is_none()
+                && tower.is_basic(source_tower.gem, source_tower.grade);
             if eligible {
                 spawn_halo(
                     &mut commands,
@@ -1301,13 +1327,13 @@ pub fn sync_aura_range_rings(
             continue;
         }
 
-        if !matches!(tower.gem.effect(tower.grade), GemEffect::Haste { .. }) {
+        let Some(radius) = tower.range_indicator_radius() else {
             continue;
-        }
+        };
 
         let center = transform.translation.truncate();
-        let rgb = tower.gem.srgb();
-        let radius = tower.range + pulse * 4.0;
+        let rgb = tower.srgb();
+        let radius = radius + pulse * 4.0;
         let segment_length = std::f32::consts::TAU * radius / SEGMENTS as f32 * 0.62;
         let thickness = 4.0 + pulse * 2.0;
         let alpha = 0.20 + pulse * 0.18;
@@ -1339,9 +1365,9 @@ fn spawn_board_tiles(commands: &mut Commands, board: &Board) {
     for row in 0..crate::constants::GRID_ROWS {
         for col in 0..crate::constants::GRID_COLUMNS {
             let pos = GridPos::new(col, row);
-            let color = if pos == start_pos() {
+            let color = if pos == board.start {
                 Color::srgb(0.10, 0.38, 0.18)
-            } else if pos == finish_pos() {
+            } else if pos == board.finish {
                 Color::srgb(0.42, 0.13, 0.14)
             } else if protected.contains(&pos) {
                 Color::srgb(0.22, 0.18, 0.08)
@@ -1692,6 +1718,14 @@ fn spawn_home_screen(commands: &mut Commands) {
         Vec2::new(250.0, 58.0),
         "Settings",
         MenuAction::Settings,
+        HomeScreen,
+    );
+    spawn_menu_button(
+        commands,
+        Vec2::new(0.0, -272.0),
+        Vec2::new(250.0, 58.0),
+        "Quit",
+        MenuAction::Quit,
         HomeScreen,
     );
 }

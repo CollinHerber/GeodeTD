@@ -13,11 +13,13 @@ mod rng;
 mod ui;
 mod wave;
 
+use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, WindowMode, WindowPlugin};
 use board::Board;
 use combat::{
-    apply_poison, cleanup_effects, reap_enemies, tower_attack, update_enemy_visuals, update_slow,
+    apply_burn, apply_damage_auras, apply_poison, apply_slow_auras, cleanup_effects, reap_enemies,
+    tower_attack, update_armor_break, update_enemy_visuals, update_slow, update_stun,
 };
 use enemy_art::EnemyArt;
 use game::Game;
@@ -53,14 +55,21 @@ fn main() {
         .init_resource::<multiplayer::MultiplayerClient>()
         .init_resource::<MultiplayerUiState>()
         .init_resource::<CameraDrag>()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Geode TD".into(),
-                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Current),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Geode TD".into(),
+                        mode: WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+                    ..default()
+                }),
+        )
         .init_resource::<GemImages>()
         .init_resource::<EnemyArt>()
         .add_systems(Startup, setup)
@@ -98,9 +107,14 @@ fn main() {
                 update_wave_countdown,
                 run_wave,
                 apply_poison,
+                apply_burn,
+                update_armor_break,
+                apply_damage_auras,
                 tower_attack,
+                apply_slow_auras,
                 reap_enemies,
                 update_slow,
+                update_stun,
                 move_enemies,
                 animate_enemies,
                 update_enemy_visuals,

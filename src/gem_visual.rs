@@ -2,13 +2,14 @@ use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
-use crate::gem::{GEM_KINDS, GRADE_LADDER, GemGrade, GemKind};
+use crate::gem::{GEM_KINDS, GRADE_LADDER, GemGrade, GemKind, SPECIAL_GEMS, SpecialGem};
 
 const GEM_IMAGE_SIZE: u32 = 96;
 
 #[derive(Resource)]
 pub struct GemImages {
     handles: Vec<Handle<Image>>,
+    special_handles: Vec<Handle<Image>>,
     empty: Handle<Image>,
 }
 
@@ -20,6 +21,11 @@ impl GemImages {
             for grade in GRADE_LADDER {
                 handles.push(images.add(gem_image(gem, grade)));
             }
+        }
+
+        let mut special_handles = Vec::with_capacity(SPECIAL_GEMS.len());
+        for special in SPECIAL_GEMS {
+            special_handles.push(images.add(special_gem_image(special)));
         }
 
         let empty = images.add(Image::new(
@@ -34,11 +40,19 @@ impl GemImages {
             RenderAssetUsages::default(),
         ));
 
-        Self { handles, empty }
+        Self {
+            handles,
+            special_handles,
+            empty,
+        }
     }
 
     pub fn handle(&self, gem: GemKind, grade: GemGrade) -> Handle<Image> {
         self.handles[gem_index(gem) * GRADE_LADDER.len() + grade.tier()].clone()
+    }
+
+    pub fn special_handle(&self, special: SpecialGem) -> Handle<Image> {
+        self.special_handles[special_index(special)].clone()
     }
 
     pub fn empty(&self) -> Handle<Image> {
@@ -67,9 +81,50 @@ fn gem_index(gem: GemKind) -> usize {
 }
 
 fn gem_image(gem: GemKind, grade: GemGrade) -> Image {
+    gem_image_from_rgb(gem.srgb(), grade)
+}
+
+fn special_index(special: SpecialGem) -> usize {
+    match special {
+        SpecialGem::BlackOpal => 0,
+        SpecialGem::MysticBlackOpal => 1,
+        SpecialGem::BloodStone => 2,
+        SpecialGem::AncientBloodStone => 3,
+        SpecialGem::Gold => 4,
+        SpecialGem::EgyptianGold => 5,
+        SpecialGem::Jade => 6,
+        SpecialGem::AsianJade => 7,
+        SpecialGem::LuckyAsianJade => 8,
+        SpecialGem::Malachite => 9,
+        SpecialGem::VividMalachite => 10,
+        SpecialGem::MightyMalachite => 11,
+        SpecialGem::PinkDiamond => 12,
+        SpecialGem::GreatPinkDiamond => 13,
+        SpecialGem::RedCrystal => 14,
+        SpecialGem::RedCrystalFacet => 15,
+        SpecialGem::RoseQuartzCrystal => 16,
+        SpecialGem::Silver => 17,
+        SpecialGem::SterlingSilver => 18,
+        SpecialGem::SilverKnight => 19,
+        SpecialGem::StarRuby => 20,
+        SpecialGem::BloodStar => 21,
+        SpecialGem::FireStar => 22,
+        SpecialGem::Tourmaline => 23,
+        SpecialGem::ParaibaTourmaline => 24,
+        SpecialGem::Uranium238 => 25,
+        SpecialGem::Uranium235 => 26,
+        SpecialGem::YellowSapphire => 27,
+        SpecialGem::StarYellowSapphire => 28,
+    }
+}
+
+fn special_gem_image(special: SpecialGem) -> Image {
+    gem_image_from_rgb(special.srgb(), special.sprite_grade())
+}
+
+fn gem_image_from_rgb(base: [f32; 3], grade: GemGrade) -> Image {
     let mut data = vec![0; (GEM_IMAGE_SIZE * GEM_IMAGE_SIZE * 4) as usize];
     let polygon = silhouette(grade);
-    let base = gem.srgb();
     let tier = grade.tier() as f32;
     let facet_width = 0.025 + tier * 0.004;
     let glow_radius = match grade {
